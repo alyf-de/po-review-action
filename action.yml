@@ -2,6 +2,9 @@ name: Review PO pull requests
 description: >
   Post PR review comments for gettext .po msgstr changes and .pot msgid
   additions or removals, grouped by language.
+branding:
+  icon: 'eye'
+  color: 'blue'
 inputs:
   token:
     description: GitHub token used to read pull request files and post comments.
