@@ -1,8 +1,10 @@
 # Review PO pull requests
 
-A GitHub Action that posts review-friendly summaries on pull requests that change gettext `.po` files.
+A GitHub Action that posts review-friendly summaries on pull requests that change gettext `.po` or `.pot` files.
 
 Large translation PRs are hard to review in GitHub's diff UI because line-number churn hides the actual `msgstr` changes. This action compares the trusted base commit against the PR head, extracts added or changed translations, groups files with similar diff sizes, and posts one or more collapsible PR comments.
+
+For `.pot` template files, the action posts a separate comment listing added and removed translatable strings (by `msgid` identity), ignoring reference-only or metadata churn.
 
 The logic is based on the workflow used in [Frappe Framework](https://github.com/frappe/frappe).
 
@@ -10,13 +12,14 @@ The logic is based on the workflow used in [Frappe Framework](https://github.com
 
 - Compares base `.po` files from a trusted checkout with head files fetched by SHA
 - Highlights added and changed translations in per-language tables
+- Compares `.pot` template files and reports added or removed `msgid` strings in a separate comment
 - Detects bulk updates via similar change-size grouping
 - Splits oversized output across multiple comments within GitHub size limits
 - Replaces previous bot comments on synchronize to avoid stale summaries
 
 ## Usage
 
-Use `pull_request_target` so the action can read the trusted base commit and post comments without executing untrusted PR code. Restrict the workflow to `.po` paths in your repository.
+Use `pull_request_target` so the action can read the trusted base commit and post comments without executing untrusted PR code. Restrict the workflow to `.po` and `.pot` paths in your repository.
 
 ```yaml
 name: Review translation PRs
@@ -26,6 +29,7 @@ on:
     types: [opened, reopened, synchronize, ready_for_review]
     paths:
       - "**/*.po"
+      - "**/*.pot"
 
 concurrency:
   group: po-review-${{ github.event.pull_request.number }}

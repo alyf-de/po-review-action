@@ -68,7 +68,7 @@ runs:
           --head-sha "${{ inputs.pr-head-sha }}" \
           --output "${{ runner.temp }}/po-pr-review-comments.json"
 
-    - name: Post PO review comments
+    - name: Post review comments
       id: post-comments
       uses: actions/github-script@v8
       env:
@@ -77,15 +77,20 @@ runs:
         github-token: ${{ inputs.token }}
         script: |
           const fs = require("fs");
-          const marker = "<!-- po-translation-review";
+          const poMarker = "<!-- po-translation-review";
+          const potMarker = "<!-- pot-template-review";
           const { owner, repo } = context.repo;
           const issue_number = Number("${{ inputs.pr-number }}");
           const commentsFile = process.env.COMMENTS_FILE;
           const payload = JSON.parse(fs.readFileSync(commentsFile, "utf8"));
-          const bodies = payload.comments;
+          const poBodies = Array.isArray(payload.comments) ? payload.comments : [];
+          const potBodies = Array.isArray(payload.pot_comments) ? payload.pot_comments : [];
+          const bodies = [...poBodies, ...potBodies];
 
-          if (!Array.isArray(bodies) || bodies.length === 0) {
-            core.setFailed(`${commentsFile} must contain a non-empty "comments" array`);
+          if (bodies.length === 0) {
+            core.setFailed(
+              `${commentsFile} must contain at least one comment in "comments" or "pot_comments"`
+            );
             return;
           }
 
@@ -101,7 +106,7 @@ runs:
               (comment) =>
                 comment.user?.login === "github-actions[bot]" &&
                 typeof comment.body === "string" &&
-                comment.body.startsWith(marker)
+                (comment.body.startsWith(poMarker) || comment.body.startsWith(potMarker))
             )
             .map((comment) => comment.id);
 
