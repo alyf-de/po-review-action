@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+po-pr-review-comments.json
+*.egg-info/
+build/

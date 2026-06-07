@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "po-review-action"
+dynamic = ["version"]
+description = "GitHub Action that posts review summaries for gettext .po translation pull requests"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+    "Babel>=2.14,<3",
+]
+
+[tool.setuptools]
+packages = []

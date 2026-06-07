@@ -1,0 +1,125 @@
+name: Review PO pull requests
+description: >
+  Summarize gettext .po translation changes on pull requests by posting review
+  comments with added or changed msgstr values, grouped by language and split
+  when needed to stay within GitHub comment size limits.
+inputs:
+  token:
+    description: GitHub token used to read pull request files and post comments.
+    default: ${{ github.token }}
+  repository:
+    description: Repository in owner/name form.
+    default: ${{ github.repository }}
+  pr-number:
+    description: Pull request number to review.
+    default: ${{ github.event.pull_request.number }}
+  pr-head-sha:
+    description: Pull request head commit SHA used to fetch translation files.
+    default: ${{ github.event.pull_request.head.sha }}
+  base-sha:
+    description: Trusted base commit SHA checked out locally for comparison.
+    default: ${{ github.event.pull_request.base.sha }}
+  python-version:
+    description: Python version used to run the review helper.
+    default: "3.12"
+  hidden-po-files:
+    description: Comma-separated .po file names omitted from language detail tables.
+    default: ""
+  skip-checkout:
+    description: >
+      Skip checking out the base commit. Enable only when the workflow already
+      checked out the trusted base SHA into the workspace.
+    default: "false"
+outputs:
+  comments-posted:
+    description: Number of review comments posted on the pull request.
+    value: ${{ steps.post-comments.outputs.comments-posted }}
+runs:
+  using: composite
+  steps:
+    - name: Checkout trusted base
+      if: inputs.skip-checkout != 'true'
+      uses: actions/checkout@v6
+      with:
+        ref: ${{ inputs.base-sha }}
+        fetch-depth: 1
+        persist-credentials: false
+
+    - name: Setup Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install dependencies
+      shell: bash
+      run: python -m pip install --disable-pip-version-check "${{ github.action_path }}"
+
+    - name: Build PO review comments
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        PR_HEAD_SHA: ${{ inputs.pr-head-sha }}
+        HIDDEN_PO_FILES: ${{ inputs.hidden-po-files }}
+      run: |
+        python "${{ github.action_path }}/po_pr_review.py" \
+          --repo "${{ inputs.repository }}" \
+          --pr "${{ inputs.pr-number }}" \
+          --head-sha "${{ inputs.pr-head-sha }}" \
+          --output "${{ runner.temp }}/po-pr-review-comments.json"
+
+    - name: Post PO review comments
+      id: post-comments
+      uses: actions/github-script@v8
+      env:
+        COMMENTS_FILE: ${{ runner.temp }}/po-pr-review-comments.json
+      with:
+        github-token: ${{ inputs.token }}
+        script: |
+          const fs = require("fs");
+          const marker = "<!-- po-translation-review";
+          const { owner, repo } = context.repo;
+          const issue_number = Number("${{ inputs.pr-number }}");
+          const commentsFile = process.env.COMMENTS_FILE;
+          const payload = JSON.parse(fs.readFileSync(commentsFile, "utf8"));
+          const bodies = payload.comments;
+
+          if (!Array.isArray(bodies) || bodies.length === 0) {
+            core.setFailed(`${commentsFile} must contain a non-empty "comments" array`);
+            return;
+          }
+
+          const existing = await github.paginate(github.rest.issues.listComments, {
+            owner,
+            repo,
+            issue_number,
+            per_page: 100,
+          });
+
+          const previousIds = existing
+            .filter(
+              (comment) =>
+                comment.user?.login === "github-actions[bot]" &&
+                typeof comment.body === "string" &&
+                comment.body.startsWith(marker)
+            )
+            .map((comment) => comment.id);
+
+          for (const body of bodies) {
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number,
+              body,
+            });
+          }
+
+          for (const comment_id of previousIds) {
+            await github.rest.issues.deleteComment({
+              owner,
+              repo,
+              comment_id,
+            });
+          }
+
+          core.setOutput("comments-posted", String(bodies.length));
