@@ -13,5 +13,11 @@ dependencies = [
     "Babel>=2.14,<3",
 ]
 
+[dependency-groups]
+dev = [
+    "ruff>=0.15.16",
+    "ty>=0.0.44",
+]
+
 [tool.setuptools]
 packages = []

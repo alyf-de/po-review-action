@@ -927,7 +927,7 @@ def build_file_report(
 
     base_path = base_path_for_file(change)
     head_path = head_path_for_file(change)
-    display_path = head_path or base_path or change.get("filename")
+    display_path = head_path or base_path or change.get("filename") or ""
 
     try:
         base_content = read_local_file(_path_with_suffix(base_path, suffix))

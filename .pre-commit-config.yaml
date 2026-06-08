@@ -17,7 +17,7 @@ repos:
       - id: debug-statements
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.13
+    rev: v0.15.16
     hooks:
       - id: ruff
         name: "Run ruff linter and apply fixes"
@@ -39,7 +39,12 @@ repos:
         stages: [commit-msg]
         additional_dependencies: ["@commitlint/config-conventional"]
 
-ci:
-  autoupdate_schedule: weekly
-  skip: []
-  submodules: false
+  - repo: local
+    hooks:
+      - id: ty
+        name: ty (astral) — Python type checker
+        language: system
+        entry: uv run --group dev ty check
+        pass_filenames: false
+        require_serial: true
+        types: [python]
