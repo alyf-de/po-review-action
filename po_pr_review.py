@@ -257,15 +257,80 @@ def _entry_sort_key(key: tuple[str, str, str]) -> tuple[str, str, str]:
     return (key[0].lower(), key[1].lower(), key[2].lower())
 
 
+def normalize_pot_msgid(value: str) -> str:
+    """Normalize a template msgid for fuzzy comparison (case and whitespace)."""
+
+    return " ".join(value.split()).casefold()
+
+
+def pot_normalized_key(entry: TranslationEntry) -> tuple[str, str, str]:
+    return (
+        entry.context,
+        normalize_pot_msgid(entry.msgid),
+        normalize_pot_msgid(entry.msgid_plural or ""),
+    )
+
+
 def compare_pot_entries(
     base_entries: dict[tuple[str, str, str], TranslationEntry],
     head_entries: dict[tuple[str, str, str], TranslationEntry],
-) -> tuple[list[TranslationEntry], list[TranslationEntry]]:
-    """Return msgids added and removed between base and head template catalogs."""
+) -> list[dict[str, Any]]:
+    """Return msgid changes between base and head template catalogs."""
 
-    added = [head_entries[key] for key in sorted(head_entries, key=_entry_sort_key) if key not in base_entries]
-    removed = [base_entries[key] for key in sorted(base_entries, key=_entry_sort_key) if key not in head_entries]
-    return added, removed
+    base_only_keys = sorted(
+        (key for key in base_entries if key not in head_entries),
+        key=_entry_sort_key,
+    )
+    head_only_keys = sorted(
+        (key for key in head_entries if key not in base_entries),
+        key=_entry_sort_key,
+    )
+
+    by_norm_base: dict[tuple[str, str, str], list[TranslationEntry]] = {}
+    by_norm_head: dict[tuple[str, str, str], list[TranslationEntry]] = {}
+
+    for key in base_only_keys:
+        entry = base_entries[key]
+        by_norm_base.setdefault(pot_normalized_key(entry), []).append(entry)
+
+    for key in head_only_keys:
+        entry = head_entries[key]
+        by_norm_head.setdefault(pot_normalized_key(entry), []).append(entry)
+
+    changes: list[dict[str, Any]] = []
+    all_norm_keys = sorted(
+        set(by_norm_base) | set(by_norm_head),
+        key=_entry_sort_key,
+    )
+
+    for norm_key in all_norm_keys:
+        base_list = sorted(
+            by_norm_base.get(norm_key, []),
+            key=lambda entry: (entry.msgid.lower(), (entry.msgid_plural or "").lower()),
+        )
+        head_list = sorted(
+            by_norm_head.get(norm_key, []),
+            key=lambda entry: (entry.msgid.lower(), (entry.msgid_plural or "").lower()),
+        )
+
+        pairs = min(len(base_list), len(head_list))
+        changes.extend(
+            {
+                "status": "corrected",
+                "before": base_list[index],
+                "after": head_list[index],
+            }
+            for index in range(pairs)
+        )
+        changes.extend(
+            {"status": "removed", "before": entry, "after": None}
+            for entry in base_list[pairs:]
+        )
+        changes.extend(
+            {"status": "added", "before": None, "after": entry}
+            for entry in head_list[pairs:]
+        )
+    return changes
 
 
 def within_tolerance(value: int, reference: float, tolerance: float = SIMILARITY_TOLERANCE) -> bool:
@@ -834,13 +899,12 @@ def build_file_report(
                 None,
             )
 
-        added, removed = compare_pot_entries(base_entries, head_entries)
+        changes = compare_pot_entries(base_entries, head_entries)
         return (
             {
                 "path": display_path,
                 "status": change.get("status"),
-                "added": added,
-                "removed": removed,
+                "changes": changes,
             },
             None,
         )
@@ -848,35 +912,35 @@ def build_file_report(
         return None, {"path": display_path, "error": str(exc)}
 
 
-def render_pot_entry(entry: TranslationEntry) -> str:
-    """Render one template msgid for markdown list output."""
-
-    if entry.msgid_plural:
-        return f"`{entry.msgid}` (plural: `{entry.msgid_plural}`)"
-    return f"`{entry.msgid}`"
-
-
 def build_pot_file_section(report: dict[str, Any]) -> list[str]:
-    """Render one .pot file's added and removed msgids as markdown."""
+    """Render one .pot file's msgid changes as a markdown table."""
 
-    lines = [f"### `{report['path']}`", ""]
-    added: list[TranslationEntry] = report.get("added", [])
-    removed: list[TranslationEntry] = report.get("removed", [])
+    lines = [
+        f"### `{report['path']}`",
+        "",
+        "| Status | Previous | Current |",
+        "| --- | --- | --- |",
+    ]
 
-    if added:
-        lines.append("**Added:**")
-        lines.append("")
-        for entry in added:
-            lines.append(f"- {render_pot_entry(entry)}")
-        lines.append("")
+    for change in report["changes"]:
+        before = change["before"]
+        after = change["after"]
+        previous = render_msgid(before) if before else ""
+        current = render_msgid(after) if after else ""
 
-    if removed:
-        lines.append("**Removed:**")
-        lines.append("")
-        for entry in removed:
-            lines.append(f"- {render_pot_entry(entry)}")
-        lines.append("")
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    str(change["status"]),
+                    escape_table_cell(previous),
+                    escape_table_cell(current),
+                ]
+            )
+            + " |"
+        )
 
+    lines.append("")
     return lines
 
 
@@ -886,16 +950,15 @@ def _pot_details_summary(
     total_parts: int,
     added_count: int,
     removed_count: int,
+    corrected_count: int,
     file_count: int,
 ) -> str:
+    counts = f"{added_count} added, {removed_count} removed, {corrected_count} corrected"
     if total_parts == 1:
-        return (
-            f"Template string changes ({added_count} added, {removed_count} removed "
-            f"across {file_count} file(s))"
-        )
+        return f"Template string changes ({counts} across {file_count} file(s))"
     return (
         f"Template string changes (part {part_index} of {total_parts}, "
-        f"{added_count} added, {removed_count} removed across {file_count} file(s))"
+        f"{counts} across {file_count} file(s))"
     )
 
 
@@ -907,6 +970,7 @@ def _render_pot_comment(
     suffix_text: str,
     added_count: int,
     removed_count: int,
+    corrected_count: int,
     file_count: int,
 ) -> str:
     return _render_details_comment(
@@ -919,6 +983,7 @@ def _render_pot_comment(
             total_parts=total_parts,
             added_count=added_count,
             removed_count=removed_count,
+            corrected_count=corrected_count,
             file_count=file_count,
         ),
         section_bodies=section_bodies,
@@ -934,13 +999,29 @@ def build_pot_comment_bodies(
     """Build one or more .pot review comment bodies under GitHub's size limit."""
 
     reports_with_changes = [
-        report for report in pot_reports if report.get("added") or report.get("removed")
+        report for report in pot_reports if report.get("changes")
     ]
     if not reports_with_changes and not parse_errors:
         return []
 
-    added_count = sum(len(report.get("added", [])) for report in reports_with_changes)
-    removed_count = sum(len(report.get("removed", [])) for report in reports_with_changes)
+    added_count = sum(
+        1
+        for report in reports_with_changes
+        for change in report["changes"]
+        if change["status"] == "added"
+    )
+    removed_count = sum(
+        1
+        for report in reports_with_changes
+        for change in report["changes"]
+        if change["status"] == "removed"
+    )
+    corrected_count = sum(
+        1
+        for report in reports_with_changes
+        for change in report["changes"]
+        if change["status"] == "corrected"
+    )
     file_count = len(reports_with_changes)
     suffix_text = "\n".join(_build_parse_error_lines(parse_errors))
 
@@ -958,6 +1039,7 @@ def build_pot_comment_bodies(
             suffix_text=suffix_text,
             added_count=added_count,
             removed_count=removed_count,
+            corrected_count=corrected_count,
             file_count=file_count,
         )
 

@@ -142,12 +142,71 @@ msgstr ""
         _, base_entries = load_translation_entries(base_pot)
         _, head_entries = load_translation_entries(head_pot)
 
-        added, removed = compare_pot_entries(base_entries, head_entries)
+        changes = compare_pot_entries(base_entries, head_entries)
 
+        self.assertEqual(len(changes), 2)
+        added = [change for change in changes if change["status"] == "added"]
+        removed = [change for change in changes if change["status"] == "removed"]
         self.assertEqual(len(added), 1)
-        self.assertEqual(added[0].msgid, "Welcome")
+        self.assertEqual(added[0]["after"].msgid, "Welcome")
         self.assertEqual(len(removed), 1)
-        self.assertEqual(removed[0].msgid, "Goodbye")
+        self.assertEqual(removed[0]["before"].msgid, "Goodbye")
+
+    def test_compare_pot_entries_treats_case_change_as_corrected(self):
+        base_pot = """
+msgid ""
+msgstr ""
+
+msgid "Auto Reserve Stock"
+msgstr ""
+
+msgid "Enable Stock Reservation"
+msgstr ""
+"""
+        head_pot = """
+msgid ""
+msgstr ""
+
+msgid "Auto reserve stock"
+msgstr ""
+
+msgid "Enable stock reservation"
+msgstr ""
+"""
+        _, base_entries = load_translation_entries(base_pot)
+        _, head_entries = load_translation_entries(head_pot)
+
+        changes = compare_pot_entries(base_entries, head_entries)
+
+        self.assertEqual(len(changes), 2)
+        self.assertTrue(all(change["status"] == "corrected" for change in changes))
+        self.assertEqual(changes[0]["before"].msgid, "Auto Reserve Stock")
+        self.assertEqual(changes[0]["after"].msgid, "Auto reserve stock")
+
+    def test_compare_pot_entries_treats_whitespace_change_as_corrected(self):
+        base_pot = """
+msgid ""
+msgstr ""
+
+msgid "Save   changes"
+msgstr ""
+"""
+        head_pot = """
+msgid ""
+msgstr ""
+
+msgid "Save changes"
+msgstr ""
+"""
+        _, base_entries = load_translation_entries(base_pot)
+        _, head_entries = load_translation_entries(head_pot)
+
+        changes = compare_pot_entries(base_entries, head_entries)
+
+        self.assertEqual(len(changes), 1)
+        self.assertEqual(changes[0]["status"], "corrected")
+        self.assertEqual(changes[0]["before"].msgid, "Save   changes")
+        self.assertEqual(changes[0]["after"].msgid, "Save changes")
 
     def test_compare_pot_entries_ignores_reference_only_changes(self):
         base_pot = """
@@ -169,21 +228,26 @@ msgstr ""
         _, base_entries = load_translation_entries(base_pot)
         _, head_entries = load_translation_entries(head_pot)
 
-        added, removed = compare_pot_entries(base_entries, head_entries)
+        changes = compare_pot_entries(base_entries, head_entries)
 
-        self.assertEqual(added, [])
-        self.assertEqual(removed, [])
+        self.assertEqual(changes, [])
 
     def test_build_pot_comment_includes_marker_and_changes(self):
         pot_reports = [
             {
                 "path": "locale/main.pot",
                 "status": "modified",
-                "added": [
-                    TranslationEntry("", "Configure", None, ("",)),
-                ],
-                "removed": [
-                    TranslationEntry("", "Administration", None, ("",)),
+                "changes": [
+                    {
+                        "status": "added",
+                        "before": None,
+                        "after": TranslationEntry("", "Configure", None, ("",)),
+                    },
+                    {
+                        "status": "removed",
+                        "before": TranslationEntry("", "Administration", None, ("",)),
+                        "after": None,
+                    },
                 ],
             }
         ]
@@ -194,16 +258,39 @@ msgstr ""
         self.assertTrue(bodies[0].startswith(POT_COMMENT_MARKER))
         self.assertIn("Configure", bodies[0])
         self.assertIn("Administration", bodies[0])
-        self.assertIn("**Added:**", bodies[0])
-        self.assertIn("**Removed:**", bodies[0])
+        self.assertIn("| Status | Previous | Current |", bodies[0])
+        self.assertIn("| added |", bodies[0])
+        self.assertIn("| removed |", bodies[0])
+
+    def test_build_pot_comment_includes_corrected_rows(self):
+        pot_reports = [
+            {
+                "path": "locale/main.pot",
+                "status": "modified",
+                "changes": [
+                    {
+                        "status": "corrected",
+                        "before": TranslationEntry("", "Auto Reserve Stock", None, ("",)),
+                        "after": TranslationEntry("", "Auto reserve stock", None, ("",)),
+                    },
+                ],
+            }
+        ]
+
+        bodies = build_pot_comment_bodies(pot_reports, [])
+
+        self.assertEqual(len(bodies), 1)
+        self.assertIn("1 corrected", bodies[0])
+        self.assertIn("| corrected |", bodies[0])
+        self.assertIn("Auto Reserve Stock", bodies[0])
+        self.assertIn("Auto reserve stock", bodies[0])
 
     def test_build_pot_comment_empty_when_no_msgid_changes(self):
         pot_reports = [
             {
                 "path": "locale/main.pot",
                 "status": "modified",
-                "added": [],
-                "removed": [],
+                "changes": [],
             }
         ]
 
