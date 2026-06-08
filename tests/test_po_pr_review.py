@@ -72,7 +72,9 @@ msgstr ""
         self.assertEqual(len(groups[0]["files"]), 3)
 
     def test_build_comment_includes_marker_and_summary(self):
-        po_files = [{"filename": "de.po", "status": "modified", "additions": 2, "deletions": 1}]
+        po_files = [
+            {"filename": "de.po", "status": "modified", "additions": 2, "deletions": 1}
+        ]
         language_reports = [
             {
                 "language": "de",
@@ -270,8 +272,12 @@ msgstr ""
                 "changes": [
                     {
                         "status": "corrected",
-                        "before": TranslationEntry("", "Auto Reserve Stock", None, ("",)),
-                        "after": TranslationEntry("", "Auto reserve stock", None, ("",)),
+                        "before": TranslationEntry(
+                            "", "Auto Reserve Stock", None, ("",)
+                        ),
+                        "after": TranslationEntry(
+                            "", "Auto reserve stock", None, ("",)
+                        ),
                     },
                 ],
             }

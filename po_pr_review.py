@@ -58,7 +58,9 @@ def parse_args() -> argparse.Namespace:
     )
     pr_from_env = os.environ.get("PR_NUMBER")
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY"))
-    parser.add_argument("--pr", type=int, default=int(pr_from_env) if pr_from_env else None)
+    parser.add_argument(
+        "--pr", type=int, default=int(pr_from_env) if pr_from_env else None
+    )
     parser.add_argument("--head-sha", default=os.environ.get("PR_HEAD_SHA"))
     parser.add_argument("--hidden-po-files", default=os.environ.get("HIDDEN_PO_FILES"))
     parser.add_argument("--output", default="po-pr-review-comments.json")
@@ -248,7 +250,9 @@ def compare_entries(
             continue
 
         if base_entry.translation != head_entry.translation:
-            changes.append({"status": "changed", "before": base_entry, "after": head_entry})
+            changes.append(
+                {"status": "changed", "before": base_entry, "after": head_entry}
+            )
 
     return changes
 
@@ -333,7 +337,9 @@ def compare_pot_entries(
     return changes
 
 
-def within_tolerance(value: int, reference: float, tolerance: float = SIMILARITY_TOLERANCE) -> bool:
+def within_tolerance(
+    value: int, reference: float, tolerance: float = SIMILARITY_TOLERANCE
+) -> bool:
     if reference == 0:
         return value == 0
 
@@ -348,7 +354,11 @@ def cluster_similar_change_sizes(changes: list[dict[str, Any]]) -> list[dict[str
 
     sorted_changes = sorted(
         changes,
-        key=lambda item: (-item.get("additions", 0), -item.get("deletions", 0), item.get("filename", "")),
+        key=lambda item: (
+            -item.get("additions", 0),
+            -item.get("deletions", 0),
+            item.get("filename", ""),
+        ),
     )
 
     for change in sorted_changes:
@@ -356,16 +366,16 @@ def cluster_similar_change_sizes(changes: list[dict[str, Any]]) -> list[dict[str
         deletions = change.get("deletions", 0)
 
         for cluster in clusters:
-            if within_tolerance(additions, cluster["avg_additions"]) and within_tolerance(
-                deletions, cluster["avg_deletions"]
-            ):
+            if within_tolerance(
+                additions, cluster["avg_additions"]
+            ) and within_tolerance(deletions, cluster["avg_deletions"]):
                 cluster["files"].append(change)
-                cluster["avg_additions"] = sum(file["additions"] for file in cluster["files"]) / len(
-                    cluster["files"]
-                )
-                cluster["avg_deletions"] = sum(file["deletions"] for file in cluster["files"]) / len(
-                    cluster["files"]
-                )
+                cluster["avg_additions"] = sum(
+                    file["additions"] for file in cluster["files"]
+                ) / len(cluster["files"])
+                cluster["avg_deletions"] = sum(
+                    file["deletions"] for file in cluster["files"]
+                ) / len(cluster["files"])
                 break
         else:
             clusters.append(
@@ -378,7 +388,11 @@ def cluster_similar_change_sizes(changes: list[dict[str, Any]]) -> list[dict[str
 
     return sorted(
         [cluster for cluster in clusters if len(cluster["files"]) > 1],
-        key=lambda cluster: (-len(cluster["files"]), -cluster["avg_additions"], -cluster["avg_deletions"]),
+        key=lambda cluster: (
+            -len(cluster["files"]),
+            -cluster["avg_additions"],
+            -cluster["avg_deletions"],
+        ),
     )
 
 
@@ -386,7 +400,9 @@ def format_translation(translation: tuple[str, ...]) -> str:
     if len(translation) == 1:
         return translation[0]
 
-    return "\n".join(f"[{index}] {value or '(empty)'}" for index, value in enumerate(translation))
+    return "\n".join(
+        f"[{index}] {value or '(empty)'}" for index, value in enumerate(translation)
+    )
 
 
 def escape_table_cell(value: str) -> str:
@@ -403,7 +419,9 @@ def render_msgid(entry: TranslationEntry) -> str:
     return "\n".join(parts)
 
 
-def should_hide_report_from_review(report: dict[str, Any], hidden_po_files: set[str]) -> bool:
+def should_hide_report_from_review(
+    report: dict[str, Any], hidden_po_files: set[str]
+) -> bool:
     """Return whether a file should be omitted from reviewer-facing language details."""
 
     return Path(str(report["path"])).name in hidden_po_files
@@ -458,11 +476,21 @@ def _review_context(
 
     status_counts = Counter(change.get("status", "modified") for change in po_files)
     reviewable_language_reports = [
-        report for report in language_reports if not should_hide_report_from_review(report, hidden_po_files)
+        report
+        for report in language_reports
+        if not should_hide_report_from_review(report, hidden_po_files)
     ]
-    translation_change_count = sum(len(report["changes"]) for report in reviewable_language_reports)
-    changed_languages_count = sum(1 for report in reviewable_language_reports if report["changes"])
-    removed_reports = [report for report in reviewable_language_reports if report["status"] == "removed"]
+    translation_change_count = sum(
+        len(report["changes"]) for report in reviewable_language_reports
+    )
+    changed_languages_count = sum(
+        1 for report in reviewable_language_reports if report["changes"]
+    )
+    removed_reports = [
+        report
+        for report in reviewable_language_reports
+        if report["status"] == "removed"
+    ]
     metadata_only_reports = [
         report
         for report in reviewable_language_reports
@@ -512,18 +540,24 @@ def _build_prefix_lines(ctx: dict[str, Any]) -> list[str]:
         for group in similar_groups:
             representative_additions = round(group["avg_additions"])
             representative_deletions = round(group["avg_deletions"])
-            file_names = ", ".join(f"`{Path(change['filename']).name}`" for change in group["files"])
+            file_names = ", ".join(
+                f"`{Path(change['filename']).name}`" for change in group["files"]
+            )
             lines.append(
                 f"- Around `+{representative_additions} / -{representative_deletions}` lines: "
                 f"`{len(group['files'])}` files ({file_names})"
             )
     else:
-        lines.append("- No repeated change-size groups were found within the 2% tolerance.")
+        lines.append(
+            "- No repeated change-size groups were found within the 2% tolerance."
+        )
 
     return lines
 
 
-def _build_report_list_section(heading: str, reports: list[dict[str, Any]]) -> list[str]:
+def _build_report_list_section(
+    heading: str, reports: list[dict[str, Any]]
+) -> list[str]:
     if not reports:
         return []
 
@@ -535,8 +569,16 @@ def _build_report_list_section(heading: str, reports: list[dict[str, Any]]) -> l
 
 def _build_suffix_lines(ctx: dict[str, Any]) -> list[str]:
     lines: list[str] = []
-    lines.extend(_build_report_list_section("### Metadata-Only File Changes", ctx["metadata_only_reports"]))
-    lines.extend(_build_report_list_section("### Removed Translation Files", ctx["removed_reports"]))
+    lines.extend(
+        _build_report_list_section(
+            "### Metadata-Only File Changes", ctx["metadata_only_reports"]
+        )
+    )
+    lines.extend(
+        _build_report_list_section(
+            "### Removed Translation Files", ctx["removed_reports"]
+        )
+    )
     lines.extend(_build_parse_error_lines(ctx["parse_errors"]))
     return lines
 
@@ -610,7 +652,9 @@ def _render_details_comment(
     else:
         full_inner = inner
 
-    return f"{head}<details>\n<summary>{summary}</summary>\n\n{full_inner}\n</details>\n"
+    return (
+        f"{head}<details>\n<summary>{summary}</summary>\n\n{full_inner}\n</details>\n"
+    )
 
 
 def _render_review_comment(
@@ -774,7 +818,9 @@ def build_comment_bodies(
     """Build one or more PR comment bodies, each under GitHub's size limit."""
 
     hidden = set() if hidden_po_files is None else hidden_po_files
-    ctx = _review_context(po_files, language_reports, similar_groups, parse_errors, hidden)
+    ctx = _review_context(
+        po_files, language_reports, similar_groups, parse_errors, hidden
+    )
     prefix_text = "\n".join(_build_prefix_lines(ctx)) + "\n\n"
     suffix_lines = _build_suffix_lines(ctx)
     suffix_text = "\n".join(suffix_lines) if suffix_lines else ""
@@ -782,7 +828,9 @@ def build_comment_bodies(
     changed_languages_count = ctx["changed_languages_count"]
     reviewable: list[dict[str, Any]] = ctx["reviewable_language_reports"]
 
-    language_reports_with_changes = [report for report in reviewable if report["changes"]]
+    language_reports_with_changes = [
+        report for report in reviewable if report["changes"]
+    ]
 
     if not language_reports_with_changes:
         empty_body = (
@@ -883,7 +931,9 @@ def build_file_report(
 
     try:
         base_content = read_local_file(_path_with_suffix(base_path, suffix))
-        head_content = fetch_file_content(repo, _path_with_suffix(head_path, suffix), head_sha)
+        head_content = fetch_file_content(
+            repo, _path_with_suffix(head_path, suffix), head_sha
+        )
         base_language, base_entries = load_translation_entries(base_content)
         head_language, head_entries = load_translation_entries(head_content)
 
@@ -953,7 +1003,9 @@ def _pot_details_summary(
     corrected_count: int,
     file_count: int,
 ) -> str:
-    counts = f"{added_count} added, {removed_count} removed, {corrected_count} corrected"
+    counts = (
+        f"{added_count} added, {removed_count} removed, {corrected_count} corrected"
+    )
     if total_parts == 1:
         return f"Template string changes ({counts} across {file_count} file(s))"
     return (
@@ -998,9 +1050,7 @@ def build_pot_comment_bodies(
 ) -> list[str]:
     """Build one or more .pot review comment bodies under GitHub's size limit."""
 
-    reports_with_changes = [
-        report for report in pot_reports if report.get("changes")
-    ]
+    reports_with_changes = [report for report in pot_reports if report.get("changes")]
     if not reports_with_changes and not parse_errors:
         return []
 
@@ -1046,7 +1096,9 @@ def build_pot_comment_bodies(
     return _collect_packed_comment_bodies(
         reports_with_changes,
         section_lines=build_pot_file_section,
-        oversized_heading=lambda report: build_oversized_section(f"### `{report['path']}`"),
+        oversized_heading=lambda report: build_oversized_section(
+            f"### `{report['path']}`"
+        ),
         render_part=render_pot_part,
         suffix_text=suffix_text,
         max_body_chars=max_body_chars,
@@ -1085,7 +1137,12 @@ def main() -> None:
         if error:
             pot_parse_errors.append(error)
 
-    language_reports.sort(key=lambda report: (str(report["language"]).lower(), str(report["path"]).lower()))
+    language_reports.sort(
+        key=lambda report: (
+            str(report["language"]).lower(),
+            str(report["path"]).lower(),
+        )
+    )
     pot_reports.sort(key=lambda report: str(report["path"]).lower())
 
     po_bodies: list[str] = []
@@ -1100,17 +1157,27 @@ def main() -> None:
                 hidden_po_files=hidden_po_files,
             )
         except RuntimeError as exc:
-            po_bodies = [_oversized_review_fallback_body(COMMENT_MARKER, "`.po` translation", exc)]
+            po_bodies = [
+                _oversized_review_fallback_body(
+                    COMMENT_MARKER, "`.po` translation", exc
+                )
+            ]
 
     pot_bodies: list[str] = []
     if pot_files:
         try:
             pot_bodies = build_pot_comment_bodies(pot_reports, pot_parse_errors)
         except RuntimeError as exc:
-            pot_bodies = [_oversized_review_fallback_body(POT_COMMENT_MARKER, "`.pot` template", exc)]
+            pot_bodies = [
+                _oversized_review_fallback_body(
+                    POT_COMMENT_MARKER, "`.pot` template", exc
+                )
+            ]
 
     Path(args.output).write_text(
-        json.dumps({"comments": po_bodies, "pot_comments": pot_bodies}, ensure_ascii=False),
+        json.dumps(
+            {"comments": po_bodies, "pot_comments": pot_bodies}, ensure_ascii=False
+        ),
         encoding="utf-8",
     )
 
