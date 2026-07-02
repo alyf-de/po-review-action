@@ -291,7 +291,7 @@ msgstr ""
         self.assertIn("Auto Reserve Stock", bodies[0])
         self.assertIn("Auto reserve stock", bodies[0])
 
-    def test_build_pot_comment_empty_when_no_msgid_changes(self):
+    def test_build_pot_comment_metadata_only_when_no_msgid_changes(self):
         pot_reports = [
             {
                 "path": "locale/main.pot",
@@ -302,7 +302,11 @@ msgstr ""
 
         bodies = build_pot_comment_bodies(pot_reports, [])
 
-        self.assertEqual(bodies, [])
+        self.assertEqual(len(bodies), 1)
+        self.assertTrue(bodies[0].startswith(POT_COMMENT_MARKER))
+        self.assertIn("Changed files: `1`", bodies[0])
+        self.assertIn("metadata, comment, or source reference updates only", bodies[0])
+        self.assertIn("locale/main.pot", bodies[0])
 
 
 if __name__ == "__main__":
