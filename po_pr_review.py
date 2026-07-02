@@ -1026,13 +1026,15 @@ def _render_pot_comment(
     file_count: int,
     first_part_head: str = POT_COMMENT_MARKER,
     empty_body: str | None = None,
+    summary: str | None = None,
 ) -> str:
     return _render_details_comment(
         part_index=part_index,
         total_parts=total_parts,
         first_part_head=first_part_head,
         review_kind=POT_REVIEW_KIND,
-        summary=_pot_details_summary(
+        summary=summary
+        or _pot_details_summary(
             part_index=part_index,
             total_parts=total_parts,
             added_count=added_count,
@@ -1061,34 +1063,32 @@ def build_pot_comment_bodies(
         status_counts = Counter(
             report.get("status", "modified") for report in pot_reports
         )
-        metadata_only_reports = [
-            report for report in pot_reports if not report.get("changes")
-        ]
+        file_count = len(pot_reports)
         prefix_text = (
             "\n".join(
                 [
                     POT_COMMENT_MARKER,
                     "Here is a summary of the `.pot` file changes:",
                     "",
-                    f"- Changed files: `{len(pot_reports)}`",
+                    f"- Changed files: `{file_count}`",
                     f"- Added files: `{status_counts.get('added', 0)}`",
                     f"- Removed files: `{status_counts.get('removed', 0)}`",
                 ]
             )
             + "\n\n"
         )
-        suffix_lines: list[str] = []
-        if metadata_only_reports:
-            suffix_lines = ["### Metadata-Only File Changes", ""]
-            suffix_lines.extend(
-                f"- `{report['path']}`" for report in metadata_only_reports
-            )
-            suffix_lines.append("")
+        suffix_lines = [
+            "### Metadata-Only File Changes",
+            "",
+            *(f"- `{report['path']}`" for report in pot_reports),
+            "",
+        ]
         suffix_text = "\n".join(suffix_lines)
         empty_body = (
             "No added, removed, or corrected template strings were detected. The `.pot` "
             "changes appear to be metadata, comment, or source reference updates only.\n"
         )
+        file_label = "file" if file_count == 1 else "files"
         body = _render_pot_comment(
             part_index=1,
             total_parts=1,
@@ -1098,8 +1098,9 @@ def build_pot_comment_bodies(
             added_count=0,
             removed_count=0,
             corrected_count=0,
-            file_count=0,
+            file_count=file_count,
             empty_body=empty_body,
+            summary=f"Metadata-only template file changes ({file_count} {file_label})",
         )
         if len(body) > max_body_chars:
             raise RuntimeError(

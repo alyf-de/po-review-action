@@ -305,6 +305,7 @@ msgstr ""
         self.assertEqual(len(bodies), 1)
         self.assertTrue(bodies[0].startswith(POT_COMMENT_MARKER))
         self.assertIn("Changed files: `1`", bodies[0])
+        self.assertIn("Metadata-only template file changes (1 file)", bodies[0])
         self.assertIn("metadata, comment, or source reference updates only", bodies[0])
         self.assertIn("locale/main.pot", bodies[0])
 
