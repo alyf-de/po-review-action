@@ -5,6 +5,7 @@ from po_pr_review import (
     POT_COMMENT_MARKER,
     TranslationEntry,
     build_comment,
+    build_comment_bodies,
     build_pot_comment_bodies,
     cluster_similar_change_sizes,
     compare_entries,
@@ -308,6 +309,131 @@ msgstr ""
         self.assertIn("Metadata-only template file changes (1 file)", bodies[0])
         self.assertIn("metadata, comment, or source reference updates only", bodies[0])
         self.assertIn("locale/main.pot", bodies[0])
+
+    def _po_change(self, msgid: str, translation: str = "x") -> dict:
+        return {
+            "status": "changed",
+            "before": None,
+            "after": TranslationEntry("", msgid, None, (translation,)),
+        }
+
+    def _po_report(self, language: str, path: str, msgids: list[str]) -> dict:
+        return {
+            "language": language,
+            "path": path,
+            "status": "modified",
+            "changes": [self._po_change(msgid) for msgid in msgids],
+        }
+
+    def _pot_change(self, status: str, msgid: str) -> dict:
+        entry = TranslationEntry("", msgid, None, ("",))
+        if status == "added":
+            return {"status": "added", "before": None, "after": entry}
+        if status == "removed":
+            return {"status": "removed", "before": entry, "after": None}
+        return {"status": "corrected", "before": entry, "after": entry}
+
+    def test_build_comment_wraps_each_locale_in_details(self):
+        po_files = [
+            {"filename": "de.po", "status": "modified", "additions": 1, "deletions": 0},
+            {"filename": "fr.po", "status": "modified", "additions": 1, "deletions": 0},
+        ]
+        language_reports = [
+            self._po_report("de", "locale/de.po", ["Hello"]),
+            self._po_report("fr", "locale/fr.po", ["Bonjour"]),
+        ]
+
+        bodies = build_comment_bodies(po_files, language_reports, [], [])
+
+        self.assertEqual(len(bodies), 1)
+        body = bodies[0]
+        self.assertEqual(body.count("<details>"), 2)
+        self.assertEqual(body.count("</details>"), 2)
+        self.assertIn("<summary>`de` (`locale/de.po`) — 1 entries</summary>", body)
+        self.assertIn("<summary>`fr` (`locale/fr.po`) — 1 entries</summary>", body)
+        # No single outer details wrapping both locale headings.
+        first_details = body.index("<details>")
+        self.assertLess(body.index("### `de`"), body.index("</details>", first_details))
+
+    def test_build_comment_packs_locales_into_separate_comments_when_needed(self):
+        po_files = [
+            {"filename": "de.po", "status": "modified", "additions": 1, "deletions": 0},
+            {"filename": "fr.po", "status": "modified", "additions": 1, "deletions": 0},
+        ]
+        language_reports = [
+            self._po_report("de", "locale/de.po", ["Hello"]),
+            self._po_report("fr", "locale/fr.po", ["Bonjour"]),
+        ]
+
+        bodies = build_comment_bodies(
+            po_files, language_reports, [], [], max_body_chars=650
+        )
+
+        self.assertGreaterEqual(len(bodies), 2)
+        for body in bodies:
+            self.assertIn("<details>", body)
+            self.assertIn("</details>", body)
+
+    def test_build_comment_splits_oversized_locale_across_comments(self):
+        msgids = [f"String {index:04d}" for index in range(40)]
+        po_files = [
+            {"filename": "de.po", "status": "modified", "additions": 40, "deletions": 0}
+        ]
+        language_reports = [self._po_report("de", "locale/de.po", msgids)]
+
+        bodies = build_comment_bodies(
+            po_files, language_reports, [], [], max_body_chars=1_200
+        )
+
+        self.assertGreaterEqual(len(bodies), 2)
+        joined = "\n".join(bodies)
+        self.assertNotIn("Too many changes to fit into a comment", joined)
+        self.assertIn("part 1 of", joined)
+        self.assertIn("part 2 of", joined)
+        for msgid in msgids:
+            self.assertIn(msgid, joined)
+
+    def test_build_pot_comment_wraps_each_file_in_details(self):
+        pot_reports = [
+            {
+                "path": "locale/a.pot",
+                "status": "modified",
+                "changes": [self._pot_change("added", "Alpha")],
+            },
+            {
+                "path": "locale/b.pot",
+                "status": "modified",
+                "changes": [self._pot_change("removed", "Beta")],
+            },
+        ]
+
+        bodies = build_pot_comment_bodies(pot_reports, [])
+
+        self.assertEqual(len(bodies), 1)
+        body = bodies[0]
+        self.assertEqual(body.count("<details>"), 2)
+        self.assertIn(
+            "<summary>`locale/a.pot` — 1 added, 0 removed, 0 corrected</summary>", body
+        )
+        self.assertIn(
+            "<summary>`locale/b.pot` — 0 added, 1 removed, 0 corrected</summary>", body
+        )
+
+    def test_build_pot_comment_splits_oversized_file_across_comments(self):
+        changes = [self._pot_change("added", f"Msg {index:04d}") for index in range(40)]
+        pot_reports = [
+            {"path": "locale/main.pot", "status": "modified", "changes": changes}
+        ]
+
+        bodies = build_pot_comment_bodies(pot_reports, [], max_body_chars=900)
+
+        self.assertGreaterEqual(len(bodies), 2)
+        joined = "\n".join(bodies)
+        self.assertNotIn("Too many changes to fit into a comment", joined)
+        self.assertIn("part 1 of", joined)
+        self.assertIn("part 2 of", joined)
+        for change in changes:
+            self.assertIn(change["after"].msgid, joined)
 
 
 if __name__ == "__main__":
