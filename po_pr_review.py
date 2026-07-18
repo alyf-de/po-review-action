@@ -798,12 +798,14 @@ def _expand_report_sections(
 
     changes = list(report["changes"])
     full_section = build_section(changes, 1, 1)
+    # Bound > 1 so the fit check also covers a longer continuation-marker head
+    # (POT part-1 marker is shorter than "part N/M" heads used when packing).
     if _section_fits_in_comment(
         full_section,
         render_part=render_part,
         suffix_text=suffix_text,
         max_body_chars=max_body_chars,
-        total_parts_upper_bound=1,
+        total_parts_upper_bound=999,
     ):
         return [full_section]
 
