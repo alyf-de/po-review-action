@@ -2,19 +2,19 @@
 
 A GitHub Action that posts review-friendly summaries on pull requests that change gettext `.po` or `.pot` files.
 
-Large translation PRs are hard to review in GitHub's diff UI because line-number churn hides the actual `msgstr` changes. This action compares the trusted base commit against the PR head, extracts added or changed translations, groups files with similar diff sizes, and posts one or more collapsible PR comments.
+Large translation PRs are hard to review in GitHub's diff UI because line-number churn hides the actual `msgstr` changes. This action compares the trusted base commit against the PR head, extracts added or changed translations, groups files with similar diff sizes, and posts one or more PR comments with a collapsible section per language (or `.pot` file).
 
-For `.pot` template files, the action posts a separate comment with a side-by-side table of added, removed, and corrected translatable strings. Case-only or whitespace-only `msgid` changes are grouped as corrections instead of separate add/remove rows.
+For `.pot` template files, the action posts a separate comment stream with side-by-side tables of added, removed, and corrected translatable strings. Case-only or whitespace-only `msgid` changes are grouped as corrections instead of separate add/remove rows.
 
 The logic is based on the workflow used in [Frappe Framework](https://github.com/frappe/frappe).
 
 ## Features
 
 - Compares base `.po` files from a trusted checkout with head files fetched by SHA
-- Highlights added and changed translations in per-language tables
-- Compares `.pot` template files and reports added, removed, and corrected `msgid` strings in a separate table comment
+- Highlights added and changed translations in per-language collapsible sections
+- Compares `.pot` template files and reports added, removed, and corrected `msgid` strings in per-file collapsible sections
 - Detects bulk updates via similar change-size grouping
-- Splits oversized output across multiple comments within GitHub size limits
+- Packs multiple sections into one comment when they fit; splits oversized sections (and comments) within GitHub size limits
 - Replaces previous bot comments on synchronize to avoid stale summaries
 
 ## Usage

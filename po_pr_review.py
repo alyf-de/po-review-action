@@ -27,7 +27,6 @@ from babel.messages.pofile import read_po
 COMMENT_MARKER = "<!-- po-translation-review -->"
 POT_COMMENT_MARKER = "<!-- pot-template-review -->"
 MAX_COMMENT_BODY_CHARS = 60_000  # GitHub caps issue comments at 65536 characters
-TOO_MANY_CHANGES_MESSAGE = "Too many changes to fit into a comment."
 SIMILARITY_TOLERANCE = 0.02
 
 
@@ -427,9 +426,12 @@ def should_hide_report_from_review(
     return Path(str(report["path"])).name in hidden_po_files
 
 
-def build_language_section(report: dict[str, Any]) -> list[str]:
+def build_language_section(
+    report: dict[str, Any], changes: list[dict[str, Any]] | None = None
+) -> list[str]:
     """Render one language's added or changed translations as a markdown table."""
 
+    rows = report["changes"] if changes is None else changes
     lines = [
         f"### `{report['language']}` (`{report['path']}`)",
         "",
@@ -437,7 +439,7 @@ def build_language_section(report: dict[str, Any]) -> list[str]:
         "| --- | --- | --- | --- |",
     ]
 
-    for change in report["changes"]:
+    for change in rows:
         before = change["before"]
         after = change["after"]
         previous = format_translation(before.translation) if before else ""
@@ -457,12 +459,6 @@ def build_language_section(report: dict[str, Any]) -> list[str]:
 
     lines.append("")
     return lines
-
-
-def build_oversized_section(heading: str) -> str:
-    """Render a compact placeholder for sections that exceed comment limits."""
-
-    return "\n".join([heading, "", f"_{TOO_MANY_CHANGES_MESSAGE}_"])
 
 
 def _review_context(
@@ -604,36 +600,93 @@ PO_REVIEW_KIND = "po-translation-review"
 POT_REVIEW_KIND = "pot-template-review"
 
 
-def _details_summary(
+def _wrap_details(summary: str, body: str) -> str:
+    """Wrap markdown body in a collapsible details block."""
+
+    return f"<details>\n<summary>{summary}</summary>\n\n{body.rstrip()}\n</details>"
+
+
+def _locale_details_summary(
+    report: dict[str, Any],
     *,
     part_index: int,
     total_parts: int,
-    translation_change_count: int,
-    changed_languages_count: int,
+    entry_count: int,
 ) -> str:
+    label = f"`{report['language']}` (`{report['path']}`)"
     if total_parts == 1:
-        return (
-            f"Added or changed translations by language ({translation_change_count} entries across "
-            f"{changed_languages_count} file(s))"
-        )
-    return (
-        f"Added or changed translations by language (part {part_index} of {total_parts}, "
-        f"{translation_change_count} entries across {changed_languages_count} file(s))"
+        return f"{label} — {entry_count} entries"
+    return f"{label} (part {part_index} of {total_parts}, {entry_count} entries)"
+
+
+def _pot_file_details_summary(
+    report: dict[str, Any],
+    changes: list[dict[str, Any]],
+    *,
+    part_index: int,
+    total_parts: int,
+) -> str:
+    added = sum(1 for change in changes if change["status"] == "added")
+    removed = sum(1 for change in changes if change["status"] == "removed")
+    corrected = sum(1 for change in changes if change["status"] == "corrected")
+    counts = f"{added} added, {removed} removed, {corrected} corrected"
+    label = f"`{report['path']}`"
+    if total_parts == 1:
+        return f"{label} — {counts}"
+    return f"{label} (part {part_index} of {total_parts}, {counts})"
+
+
+def build_language_details_section(
+    report: dict[str, Any],
+    changes: list[dict[str, Any]] | None = None,
+    *,
+    part_index: int = 1,
+    total_parts: int = 1,
+) -> str:
+    """Render one language (or chunk) as a collapsible details section."""
+
+    rows = report["changes"] if changes is None else changes
+    table = "\n".join(build_language_section(report, rows)).rstrip()
+    summary = _locale_details_summary(
+        report,
+        part_index=part_index,
+        total_parts=total_parts,
+        entry_count=len(rows),
     )
+    return _wrap_details(summary, table)
 
 
-def _render_details_comment(
+def build_pot_details_section(
+    report: dict[str, Any],
+    changes: list[dict[str, Any]] | None = None,
+    *,
+    part_index: int = 1,
+    total_parts: int = 1,
+) -> str:
+    """Render one .pot file (or chunk) as a collapsible details section."""
+
+    rows = report["changes"] if changes is None else changes
+    table = "\n".join(build_pot_file_section(report, rows)).rstrip()
+    summary = _pot_file_details_summary(
+        report,
+        rows,
+        part_index=part_index,
+        total_parts=total_parts,
+    )
+    return _wrap_details(summary, table)
+
+
+def _render_packed_comment(
     *,
     part_index: int,
     total_parts: int,
     first_part_head: str,
     review_kind: str,
-    summary: str,
     section_bodies: list[str],
     suffix_text: str,
     empty_body: str | None = None,
 ) -> str:
-    """Assemble one GitHub issue comment body (single <details> block)."""
+    """Assemble one GitHub issue comment from pre-wrapped section bodies."""
 
     if part_index == 1:
         head = first_part_head
@@ -641,48 +694,16 @@ def _render_details_comment(
         head = f"{_continuation_marker(review_kind, part_index, total_parts)}\n\n"
 
     if section_bodies:
-        inner = "\n\n".join(section_bodies)
+        body = "\n\n".join(section_bodies)
     else:
-        inner = empty_body or ""
+        body = empty_body or ""
 
-    if inner and suffix_text:
-        full_inner = f"{inner}\n{suffix_text}"
-    elif suffix_text:
-        full_inner = suffix_text
-    else:
-        full_inner = inner
-
-    return (
-        f"{head}<details>\n<summary>{summary}</summary>\n\n{full_inner}\n</details>\n"
-    )
-
-
-def _render_review_comment(
-    *,
-    part_index: int,
-    total_parts: int,
-    prefix_text: str,
-    section_bodies: list[str],
-    suffix_text: str,
-    translation_change_count: int,
-    changed_languages_count: int,
-    empty_translation_body: str | None,
-) -> str:
-    return _render_details_comment(
-        part_index=part_index,
-        total_parts=total_parts,
-        first_part_head=prefix_text,
-        review_kind=PO_REVIEW_KIND,
-        summary=_details_summary(
-            part_index=part_index,
-            total_parts=total_parts,
-            translation_change_count=translation_change_count,
-            changed_languages_count=changed_languages_count,
-        ),
-        section_bodies=section_bodies,
-        suffix_text=suffix_text,
-        empty_body=empty_translation_body,
-    )
+    parts = [head.rstrip("\n")]
+    if body:
+        parts.append(body.rstrip("\n"))
+    if suffix_text:
+        parts.append(suffix_text.rstrip("\n"))
+    return "\n\n".join(parts) + "\n"
 
 
 def _section_fits_in_comment(
@@ -693,15 +714,123 @@ def _section_fits_in_comment(
     max_body_chars: int,
     total_parts_upper_bound: int,
 ) -> bool:
-    """Return whether a section can fit as a standalone comment body."""
+    """Return whether a section can fit as a standalone comment body.
 
-    body = render_part(
-        part_index=1,
-        total_parts=max(total_parts_upper_bound, 1),
-        section_bodies=[section],
+    Checks both the first-part head and a continuation head, since either may be
+    longer depending on the review kind (PO prefix vs POT marker).
+    """
+
+    total_parts = max(total_parts_upper_bound, 1)
+    part_indexes = {1, total_parts}
+    for part_index in part_indexes:
+        body = render_part(
+            part_index=part_index,
+            total_parts=total_parts,
+            section_bodies=[section],
+            suffix_text=suffix_text,
+        )
+        if len(body) > max_body_chars:
+            return False
+    return True
+
+
+def _largest_fitting_change_count(
+    changes: list[dict[str, Any]],
+    *,
+    build_section: Callable[[list[dict[str, Any]], int, int], str],
+    render_part: Callable[..., str],
+    suffix_text: str,
+    max_body_chars: int,
+    part_index: int,
+    total_parts_bound: int,
+    overflow_error: str,
+) -> int:
+    """Return the largest prefix length of changes that fits in one comment."""
+
+    def fits(count: int) -> bool:
+        section = build_section(changes[:count], part_index, total_parts_bound)
+        return _section_fits_in_comment(
+            section,
+            render_part=render_part,
+            suffix_text=suffix_text,
+            max_body_chars=max_body_chars,
+            total_parts_upper_bound=total_parts_bound,
+        )
+
+    if not changes:
+        return 0
+
+    if not fits(1):
+        section = build_section(changes[:1], part_index, total_parts_bound)
+        body = render_part(
+            part_index=1,
+            total_parts=max(total_parts_bound, 1),
+            section_bodies=[section],
+            suffix_text=suffix_text,
+        )
+        raise RuntimeError(
+            f"{overflow_error} ({len(body)} chars). Improve splitting or raise MAX_COMMENT_BODY_CHARS."
+        )
+
+    lo = 1
+    hi = len(changes)
+    best = 1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        if fits(mid):
+            best = mid
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return best
+
+
+def _expand_report_sections(
+    report: dict[str, Any],
+    *,
+    build_section: Callable[[list[dict[str, Any]], int, int], str],
+    render_part: Callable[..., str],
+    suffix_text: str,
+    max_body_chars: int,
+    overflow_error: str,
+) -> list[str]:
+    """Expand one report into one or more details sections that each fit alone."""
+
+    changes = list(report["changes"])
+    full_section = build_section(changes, 1, 1)
+    # Bound > 1 so the fit check also covers a longer continuation-marker head
+    # (POT part-1 marker is shorter than "part N/M" heads used when packing).
+    if _section_fits_in_comment(
+        full_section,
+        render_part=render_part,
         suffix_text=suffix_text,
-    )
-    return len(body) <= max_body_chars
+        max_body_chars=max_body_chars,
+        total_parts_upper_bound=999,
+    ):
+        return [full_section]
+
+    total_parts_bound = max(len(changes), 1)
+    slices: list[list[dict[str, Any]]] = []
+    remaining = changes
+    while remaining:
+        count = _largest_fitting_change_count(
+            remaining,
+            build_section=build_section,
+            render_part=render_part,
+            suffix_text=suffix_text,
+            max_body_chars=max_body_chars,
+            part_index=len(slices) + 1,
+            total_parts_bound=total_parts_bound,
+            overflow_error=overflow_error,
+        )
+        slices.append(remaining[:count])
+        remaining = remaining[count:]
+
+    total_parts = len(slices)
+    return [
+        build_section(chunk, index + 1, total_parts)
+        for index, chunk in enumerate(slices)
+    ]
 
 
 def _pack_sections_into_comments(
@@ -754,28 +883,31 @@ def _pack_sections_into_comments(
 def _collect_packed_comment_bodies(
     reports_with_changes: list[dict[str, Any]],
     *,
-    section_lines: Callable[[dict[str, Any]], list[str]],
-    oversized_heading: Callable[[dict[str, Any]], str],
+    expand_report: Callable[[dict[str, Any]], list[str]],
     render_part: Callable[..., str],
     suffix_text: str,
     max_body_chars: int,
     overflow_error: str,
     overflow_kind: str,
 ) -> list[str]:
-    """Build flat sections from reports, pack them, and render final comment bodies."""
+    """Expand reports into details sections, pack them, and render comment bodies."""
 
     flat_sections: list[str] = []
     for report in reports_with_changes:
-        section = "\n".join(section_lines(report)).rstrip()
-        if not _section_fits_in_comment(
-            section,
-            render_part=render_part,
+        flat_sections.extend(expand_report(report))
+
+    if not flat_sections:
+        body = render_part(
+            part_index=1,
+            total_parts=1,
+            section_bodies=[],
             suffix_text=suffix_text,
-            max_body_chars=max_body_chars,
-            total_parts_upper_bound=len(reports_with_changes),
-        ):
-            section = oversized_heading(report)
-        flat_sections.append(section)
+        )
+        if len(body) > max_body_chars:
+            raise RuntimeError(
+                f"{overflow_kind} comment exceeds max_body_chars; shorten prefix/suffix or raise limit."
+            )
+        return [body]
 
     groups = _pack_sections_into_comments(
         flat_sections,
@@ -824,34 +956,11 @@ def build_comment_bodies(
     prefix_text = "\n".join(_build_prefix_lines(ctx)) + "\n\n"
     suffix_lines = _build_suffix_lines(ctx)
     suffix_text = "\n".join(suffix_lines) if suffix_lines else ""
-    translation_change_count = ctx["translation_change_count"]
-    changed_languages_count = ctx["changed_languages_count"]
     reviewable: list[dict[str, Any]] = ctx["reviewable_language_reports"]
 
     language_reports_with_changes = [
         report for report in reviewable if report["changes"]
     ]
-
-    if not language_reports_with_changes:
-        empty_body = (
-            "No added or changed translations were detected. The `.po` changes appear to be metadata, "
-            "comment, or source reference updates only.\n"
-        )
-        body = _render_review_comment(
-            part_index=1,
-            total_parts=1,
-            prefix_text=prefix_text,
-            section_bodies=[],
-            suffix_text=suffix_text,
-            translation_change_count=translation_change_count,
-            changed_languages_count=changed_languages_count,
-            empty_translation_body=empty_body,
-        )
-        if len(body) > max_body_chars:
-            raise RuntimeError(
-                "Single metadata-only review comment exceeds max_body_chars; shorten prefix or raise limit."
-            )
-        return [body]
 
     def render_po_part(
         *,
@@ -859,24 +968,63 @@ def build_comment_bodies(
         total_parts: int,
         section_bodies: list[str],
         suffix_text: str,
+        empty_body: str | None = None,
     ) -> str:
-        return _render_review_comment(
+        return _render_packed_comment(
             part_index=part_index,
             total_parts=total_parts,
-            prefix_text=prefix_text,
+            first_part_head=prefix_text,
+            review_kind=PO_REVIEW_KIND,
             section_bodies=section_bodies,
             suffix_text=suffix_text,
-            translation_change_count=translation_change_count,
-            changed_languages_count=changed_languages_count,
-            empty_translation_body=None,
+            empty_body=empty_body,
+        )
+
+    if not language_reports_with_changes:
+        empty_message = (
+            "No added or changed translations were detected. The `.po` changes appear to be metadata, "
+            "comment, or source reference updates only.\n"
+        )
+        empty_summary = (
+            f"Added or changed translations by language "
+            f"({ctx['translation_change_count']} entries across "
+            f"{ctx['changed_languages_count']} file(s))"
+        )
+        body = render_po_part(
+            part_index=1,
+            total_parts=1,
+            section_bodies=[_wrap_details(empty_summary, empty_message)],
+            suffix_text=suffix_text,
+        )
+        if len(body) > max_body_chars:
+            raise RuntimeError(
+                "Single metadata-only review comment exceeds max_body_chars; shorten prefix or raise limit."
+            )
+        return [body]
+
+    def expand_po_report(report: dict[str, Any]) -> list[str]:
+        def build_section(
+            changes: list[dict[str, Any]], part_index: int, total_parts: int
+        ) -> str:
+            return build_language_details_section(
+                report,
+                changes,
+                part_index=part_index,
+                total_parts=total_parts,
+            )
+
+        return _expand_report_sections(
+            report,
+            build_section=build_section,
+            render_part=render_po_part,
+            suffix_text=suffix_text,
+            max_body_chars=max_body_chars,
+            overflow_error="A single translation row does not fit in one comment",
         )
 
     return _collect_packed_comment_bodies(
         language_reports_with_changes,
-        section_lines=build_language_section,
-        oversized_heading=lambda report: build_oversized_section(
-            f"### `{report['language']}` (`{report['path']}`)"
-        ),
+        expand_report=expand_po_report,
         render_part=render_po_part,
         suffix_text=suffix_text,
         max_body_chars=max_body_chars,
@@ -962,9 +1110,12 @@ def build_file_report(
         return None, {"path": display_path, "error": str(exc)}
 
 
-def build_pot_file_section(report: dict[str, Any]) -> list[str]:
+def build_pot_file_section(
+    report: dict[str, Any], changes: list[dict[str, Any]] | None = None
+) -> list[str]:
     """Render one .pot file's msgid changes as a markdown table."""
 
+    rows = report["changes"] if changes is None else changes
     lines = [
         f"### `{report['path']}`",
         "",
@@ -972,7 +1123,7 @@ def build_pot_file_section(report: dict[str, Any]) -> list[str]:
         "| --- | --- | --- |",
     ]
 
-    for change in report["changes"]:
+    for change in rows:
         before = change["before"]
         after = change["after"]
         previous = render_msgid(before) if before else ""
@@ -992,60 +1143,6 @@ def build_pot_file_section(report: dict[str, Any]) -> list[str]:
 
     lines.append("")
     return lines
-
-
-def _pot_details_summary(
-    *,
-    part_index: int,
-    total_parts: int,
-    added_count: int,
-    removed_count: int,
-    corrected_count: int,
-    file_count: int,
-) -> str:
-    counts = (
-        f"{added_count} added, {removed_count} removed, {corrected_count} corrected"
-    )
-    if total_parts == 1:
-        return f"Template string changes ({counts} across {file_count} file(s))"
-    return (
-        f"Template string changes (part {part_index} of {total_parts}, "
-        f"{counts} across {file_count} file(s))"
-    )
-
-
-def _render_pot_comment(
-    *,
-    part_index: int,
-    total_parts: int,
-    section_bodies: list[str],
-    suffix_text: str,
-    added_count: int,
-    removed_count: int,
-    corrected_count: int,
-    file_count: int,
-    first_part_head: str = POT_COMMENT_MARKER,
-    empty_body: str | None = None,
-    summary: str | None = None,
-) -> str:
-    return _render_details_comment(
-        part_index=part_index,
-        total_parts=total_parts,
-        first_part_head=first_part_head,
-        review_kind=POT_REVIEW_KIND,
-        summary=summary
-        or _pot_details_summary(
-            part_index=part_index,
-            total_parts=total_parts,
-            added_count=added_count,
-            removed_count=removed_count,
-            corrected_count=corrected_count,
-            file_count=file_count,
-        ),
-        section_bodies=section_bodies,
-        suffix_text=suffix_text,
-        empty_body=empty_body,
-    )
 
 
 def build_pot_comment_bodies(
@@ -1084,23 +1181,23 @@ def build_pot_comment_bodies(
             "",
         ]
         suffix_text = "\n".join(suffix_lines)
-        empty_body = (
+        empty_message = (
             "No added, removed, or corrected template strings were detected. The `.pot` "
             "changes appear to be metadata, comment, or source reference updates only.\n"
         )
         file_label = "file" if file_count == 1 else "files"
-        body = _render_pot_comment(
+        body = _render_packed_comment(
             part_index=1,
             total_parts=1,
             first_part_head=prefix_text,
-            section_bodies=[],
+            review_kind=POT_REVIEW_KIND,
+            section_bodies=[
+                _wrap_details(
+                    f"Metadata-only template file changes ({file_count} {file_label})",
+                    empty_message,
+                )
+            ],
             suffix_text=suffix_text,
-            added_count=0,
-            removed_count=0,
-            corrected_count=0,
-            file_count=file_count,
-            empty_body=empty_body,
-            summary=f"Metadata-only template file changes ({file_count} {file_label})",
         )
         if len(body) > max_body_chars:
             raise RuntimeError(
@@ -1109,26 +1206,8 @@ def build_pot_comment_bodies(
             )
         return [body]
 
-    added_count = sum(
-        1
-        for report in reports_with_changes
-        for change in report["changes"]
-        if change["status"] == "added"
-    )
-    removed_count = sum(
-        1
-        for report in reports_with_changes
-        for change in report["changes"]
-        if change["status"] == "removed"
-    )
-    corrected_count = sum(
-        1
-        for report in reports_with_changes
-        for change in report["changes"]
-        if change["status"] == "corrected"
-    )
-    file_count = len(reports_with_changes)
     suffix_text = "\n".join(_build_parse_error_lines(parse_errors))
+    prefix_text = f"{POT_COMMENT_MARKER}\n\n"
 
     def render_pot_part(
         *,
@@ -1136,24 +1215,41 @@ def build_pot_comment_bodies(
         total_parts: int,
         section_bodies: list[str],
         suffix_text: str,
+        empty_body: str | None = None,
     ) -> str:
-        return _render_pot_comment(
+        return _render_packed_comment(
             part_index=part_index,
             total_parts=total_parts,
+            first_part_head=prefix_text,
+            review_kind=POT_REVIEW_KIND,
             section_bodies=section_bodies,
             suffix_text=suffix_text,
-            added_count=added_count,
-            removed_count=removed_count,
-            corrected_count=corrected_count,
-            file_count=file_count,
+            empty_body=empty_body,
+        )
+
+    def expand_pot_report(report: dict[str, Any]) -> list[str]:
+        def build_section(
+            changes: list[dict[str, Any]], part_index: int, total_parts: int
+        ) -> str:
+            return build_pot_details_section(
+                report,
+                changes,
+                part_index=part_index,
+                total_parts=total_parts,
+            )
+
+        return _expand_report_sections(
+            report,
+            build_section=build_section,
+            render_part=render_pot_part,
+            suffix_text=suffix_text,
+            max_body_chars=max_body_chars,
+            overflow_error="A single .pot row does not fit in one comment",
         )
 
     return _collect_packed_comment_bodies(
         reports_with_changes,
-        section_lines=build_pot_file_section,
-        oversized_heading=lambda report: build_oversized_section(
-            f"### `{report['path']}`"
-        ),
+        expand_report=expand_pot_report,
         render_part=render_pot_part,
         suffix_text=suffix_text,
         max_body_chars=max_body_chars,
