@@ -98,9 +98,7 @@ def request_url(url: str, *, accept: str, allow_missing: bool = False) -> bytes 
 
 def request_json(url: str) -> Any:
     response = request_url(url, accept="application/vnd.github+json")
-    if response is None:
-        return None
-    return json.loads(response.decode("utf-8"))
+    return None if response is None else json.loads(response.decode("utf-8"))
 
 
 def fetch_pr_files(repo: str, pr_number: int) -> list[dict[str, Any]]:
@@ -137,10 +135,7 @@ def read_local_file(path: str | None) -> str | None:
     except ValueError as exc:
         raise ValueError(f"Unexpected repository path: {path}") from exc
 
-    if not file_path.exists():
-        return None
-
-    return file_path.read_text(encoding="utf-8")
+    return file_path.read_text(encoding="utf-8") if file_path.exists() else None
 
 
 def fetch_file_content(repo: str, path: str | None, ref: str | None) -> str | None:
@@ -153,9 +148,7 @@ def fetch_file_content(repo: str, path: str | None, ref: str | None) -> str | No
     quoted_ref = urllib.parse.quote(ref, safe="")
     url = f"https://api.github.com/repos/{repo}/contents/{quoted_path}?ref={quoted_ref}"
     response = request_url(url, accept="application/vnd.github.raw", allow_missing=True)
-    if response is None:
-        return None
-    return response.decode("utf-8")
+    return None if response is None else response.decode("utf-8")
 
 
 def is_translation_file(change: dict[str, Any], suffix: str) -> bool:
@@ -175,9 +168,7 @@ def base_path_for_file(change: dict[str, Any]) -> str | None:
 
 
 def head_path_for_file(change: dict[str, Any]) -> str | None:
-    if change.get("status") == "removed":
-        return None
-    return change.get("filename")
+    return None if change.get("status") == "removed" else change.get("filename")
 
 
 def normalize_translation(value: Any) -> tuple[str, ...]:
@@ -480,7 +471,7 @@ def _review_context(
         len(report["changes"]) for report in reviewable_language_reports
     )
     changed_languages_count = sum(
-        1 for report in reviewable_language_reports if report["changes"]
+        bool(report["changes"]) for report in reviewable_language_reports
     )
     removed_reports = [
         report
@@ -584,8 +575,9 @@ def _build_parse_error_lines(parse_errors: list[dict[str, str]]) -> list[str]:
         return []
 
     lines = ["### Parse Errors", ""]
-    for error in parse_errors:
-        lines.append(f"- `{error['path']}`: {html.escape(error['error'])}")
+    lines.extend(
+        f"- `{error['path']}`: {html.escape(error['error'])}" for error in parse_errors
+    )
     lines.append("")
     return lines
 
@@ -626,9 +618,9 @@ def _pot_file_details_summary(
     part_index: int,
     total_parts: int,
 ) -> str:
-    added = sum(1 for change in changes if change["status"] == "added")
-    removed = sum(1 for change in changes if change["status"] == "removed")
-    corrected = sum(1 for change in changes if change["status"] == "corrected")
+    added = sum(change["status"] == "added" for change in changes)
+    removed = sum(change["status"] == "removed" for change in changes)
+    corrected = sum(change["status"] == "corrected" for change in changes)
     counts = f"{added} added, {removed} removed, {corrected} corrected"
     label = f"`{report['path']}`"
     if total_parts == 1:
@@ -693,11 +685,7 @@ def _render_packed_comment(
     else:
         head = f"{_continuation_marker(review_kind, part_index, total_parts)}\n\n"
 
-    if section_bodies:
-        body = "\n\n".join(section_bodies)
-    else:
-        body = empty_body or ""
-
+    body = "\n\n".join(section_bodies) if section_bodies else empty_body or ""
     parts = [head.rstrip("\n")]
     if body:
         parts.append(body.rstrip("\n"))
