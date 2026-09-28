@@ -605,7 +605,7 @@ def _locale_details_summary(
     total_parts: int,
     entry_count: int,
 ) -> str:
-    label = f"`{report['language']}` (`{report['path']}`)"
+    label = f"<code>{html.escape(report['language'])}</code> (<code>{html.escape(report['path'])}</code>)"
     if total_parts == 1:
         return f"{label} — {entry_count} entries"
     return f"{label} (part {part_index} of {total_parts}, {entry_count} entries)"
@@ -622,7 +622,7 @@ def _pot_file_details_summary(
     removed = sum(change["status"] == "removed" for change in changes)
     corrected = sum(change["status"] == "corrected" for change in changes)
     counts = f"{added} added, {removed} removed, {corrected} corrected"
-    label = f"`{report['path']}`"
+    label = f"<code>{html.escape(report['path'])}</code>"
     if total_parts == 1:
         return f"{label} — {counts}"
     return f"{label} (part {part_index} of {total_parts}, {counts})"
