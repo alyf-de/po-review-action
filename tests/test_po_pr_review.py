@@ -349,8 +349,14 @@ msgstr ""
         body = bodies[0]
         self.assertEqual(body.count("<details>"), 2)
         self.assertEqual(body.count("</details>"), 2)
-        self.assertIn("<summary>`de` (`locale/de.po`) — 1 entries</summary>", body)
-        self.assertIn("<summary>`fr` (`locale/fr.po`) — 1 entries</summary>", body)
+        self.assertIn(
+            "<summary><code>de</code> (<code>locale/de.po</code>) — 1 entries</summary>",
+            body,
+        )
+        self.assertIn(
+            "<summary><code>fr</code> (<code>locale/fr.po</code>) — 1 entries</summary>",
+            body,
+        )
         # No single outer details wrapping both locale headings.
         first_details = body.index("<details>")
         self.assertLess(body.index("### `de`"), body.index("</details>", first_details))
@@ -413,10 +419,12 @@ msgstr ""
         body = bodies[0]
         self.assertEqual(body.count("<details>"), 2)
         self.assertIn(
-            "<summary>`locale/a.pot` — 1 added, 0 removed, 0 corrected</summary>", body
+            "<summary><code>locale/a.pot</code> — 1 added, 0 removed, 0 corrected</summary>",
+            body,
         )
         self.assertIn(
-            "<summary>`locale/b.pot` — 0 added, 1 removed, 0 corrected</summary>", body
+            "<summary><code>locale/b.pot</code> — 0 added, 1 removed, 0 corrected</summary>",
+            body,
         )
 
     def test_build_pot_comment_splits_oversized_file_across_comments(self):
