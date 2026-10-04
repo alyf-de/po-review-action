@@ -1,5 +1,7 @@
 import unittest
 
+from babel.messages.pofile import PoFileError
+
 from po_pr_review import (
     COMMENT_MARKER,
     POT_COMMENT_MARKER,
@@ -58,6 +60,24 @@ msgstr ""
         changes = compare_entries(base_entries, head_entries)
 
         self.assertEqual(changes, [])
+
+    def test_strict_load_rejects_conflict_markers(self):
+        conflicted_po = """
+msgid ""
+msgstr ""
+
+<<<<<<< HEAD
+msgid "Hello"
+msgstr "Hallo"
+=======
+msgid "Hello"
+msgstr "Servus"
+>>>>>>> branch
+"""
+        load_translation_entries(conflicted_po)
+
+        with self.assertRaises(PoFileError):
+            load_translation_entries(conflicted_po, strict=True)
 
     def test_cluster_similar_change_sizes_groups_bulk_updates(self):
         changes = [

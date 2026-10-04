@@ -22,6 +22,7 @@ from collections.abc import Callable
 from typing import Any
 from urllib.error import HTTPError
 
+from babel.messages.mofile import write_mo
 from babel.messages.pofile import read_po
 
 COMMENT_MARKER = "<!-- po-translation-review -->"
@@ -200,14 +201,20 @@ def normalize_message(message: Any) -> TranslationEntry:
 
 
 def load_translation_entries(
-    content: str | None,
+    content: str | None, *, strict: bool = False
 ) -> tuple[str | None, dict[tuple[str, str, str], TranslationEntry]]:
-    """Parse `.po` content into normalized entries keyed for translation diffing."""
+    """Parse `.po` content into normalized entries keyed for translation diffing.
+
+    With `strict`, also compile the catalog like `bench build` does, but raise on
+    invalid lines (for example, git conflict markers) instead of skipping them.
+    """
 
     if not content:
         return None, {}
 
-    catalog = read_po(io.StringIO(content))
+    catalog = read_po(io.StringIO(content), abort_invalid=strict)
+    if strict:
+        write_mo(io.BytesIO(), catalog)
     language = str(catalog.locale) if catalog.locale else None
     entries: dict[tuple[str, str, str], TranslationEntry] = {}
 
@@ -1071,7 +1078,9 @@ def build_file_report(
             repo, _path_with_suffix(head_path, suffix), head_sha
         )
         base_language, base_entries = load_translation_entries(base_content)
-        head_language, head_entries = load_translation_entries(head_content)
+        head_language, head_entries = load_translation_entries(
+            head_content, strict=True
+        )
 
         if suffix == ".po":
             language = head_language or base_language or Path(display_path).stem
@@ -1315,7 +1324,12 @@ def main() -> None:
 
     Path(args.output).write_text(
         json.dumps(
-            {"comments": po_bodies, "pot_comments": pot_bodies}, ensure_ascii=False
+            {
+                "comments": po_bodies,
+                "pot_comments": pot_bodies,
+                "error_count": len(po_parse_errors) + len(pot_parse_errors),
+            },
+            ensure_ascii=False,
         ),
         encoding="utf-8",
     )

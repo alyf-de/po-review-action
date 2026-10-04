@@ -130,3 +130,9 @@ runs:
           }
 
           core.setOutput("comments-posted", String(bodies.length));
+
+          if (payload.error_count) {
+            core.setFailed(
+              `${payload.error_count} translation file(s) could not be parsed or compiled. See the PR comment for details.`
+            );
+          }

@@ -13,6 +13,7 @@ The logic is based on the workflow used in [Frappe Framework](https://github.com
 - Compares base `.po` files from a trusted checkout with head files fetched by SHA
 - Highlights added and changed translations in per-language collapsible sections
 - Compares `.pot` template files and reports added, removed, and corrected `msgid` strings in per-file collapsible sections
+- Compiles head `.po` and `.pot` files in strict mode and fails the job if a file is invalid (for example, it contains git conflict markers). `bench build` would silently skip such lines.
 - Detects bulk updates via similar change-size grouping
 - Packs multiple sections into one comment when they fit; splits oversized sections (and comments) within GitHub size limits
 - Replaces previous bot comments on synchronize to avoid stale summaries
