@@ -46,7 +46,7 @@ jobs:
       pull-requests: write
 
     steps:
-      - uses: alyf-de/po-review-action@v1
+      - uses: alyf-de/po-review-action@f40006d8450de7fd5b538e38603185bbee744117 # v1.3.0
 ```
 
 `pr-number`, `pr-head-sha`, and `base-sha` default to values from `github.event.pull_request`, so you only need a `with:` block when overriding them (for example, `skip-checkout: true`).
