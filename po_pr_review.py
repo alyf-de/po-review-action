@@ -38,8 +38,9 @@ MAX_MISMATCH_SECTION_CHARS = 20_000
 # Brace placeholders exclude spaces so CSS/JSON code blocks are not treated as tokens.
 # URLs use the ASCII URL characters so trailing CJK text or quotes are not included.
 # A tag left open at the end is a token too, since the page's next ">" would close it.
+# Quoted attribute values may contain ">"; a stray quote is matched as a plain character.
 PROTECTED_TOKEN_PATTERN = re.compile(
-    r"</?[a-zA-Z][^>]*(?:>|$)"
+    r"""</?[a-zA-Z](?:"[^"]*"|'[^']*'|[^>])*(?:>|$)"""
     r"|\{\{.*?\}\}"
     r"|\{\w*(?:[:!][^{}\s]*)?\}"
     r"|https?://[A-Za-z0-9_\-.~:/?#\[\]@!$&*+,;=%()]+"

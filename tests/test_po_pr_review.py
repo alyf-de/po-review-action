@@ -527,6 +527,15 @@ msgstr ""
 
         self.assertEqual(list(mismatches[0]["extra"]), ["<img onerror=alert(1) src=x>"])
 
+    def test_markup_mismatch_flags_attribute_after_quoted_angle_bracket(self):
+        mismatches = self._mismatches(
+            '<img title="a>b" src=x>', ('<img title="a>b" src=x onerror=alert(1)>',)
+        )
+
+        self.assertEqual(
+            list(mismatches[0]["extra"]), ['<img onerror=alert(1) src=x title="a>b">']
+        )
+
     def test_markup_mismatch_skips_crowdin_pseudo_locale_unless_markup_added(self):
         dropped_markup = self._mismatches(
             '<b>{0}</b> see <a href="https://example.com">docs</a>',
