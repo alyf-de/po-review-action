@@ -547,6 +547,14 @@ msgstr ""
         self.assertEqual(list(changed_host[0]["extra"]), ["https://evil.example/docs"])
         self.assertEqual(lowercased_scheme, [])
 
+    def test_markup_mismatch_flags_changed_whitespace_inside_jinja(self):
+        mismatches = self._mismatches(
+            "{{ doc.name | replace('  ', ' ') }}",
+            ("{{ doc.name | replace(' ', ' ') }}",),
+        )
+
+        self.assertEqual(len(mismatches), 1)
+
     def test_markup_mismatch_skips_crowdin_pseudo_locale_unless_markup_added(self):
         dropped_markup = self._mismatches(
             '<b>{0}</b> see <a href="https://example.com">docs</a>',

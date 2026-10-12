@@ -453,7 +453,8 @@ def normalize_protected_token(token: str) -> str:
         return f"<{closing}{' '.join([name_match.group(1).lower(), *attributes])}>"
 
     if token.startswith("{{"):
-        return "{{ " + " ".join(token[2:-2].split()) + " }}"
+        # Only the padding is normalized; inner whitespace can be part of a string value.
+        return "{{ " + token[2:-2].strip() + " }}"
 
     if token[:4].lower() == "http":
         scheme, rest = token.split("://", 1)
