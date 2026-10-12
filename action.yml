@@ -27,6 +27,11 @@ inputs:
   hidden-po-files:
     description: Comma-separated .po file names omitted from language detail tables.
     default: ""
+  fail-on-mismatch:
+    description: >
+      Fail the job after posting comments when an added or changed translation
+      does not keep the HTML tags, URLs, or placeholders of its source string.
+    default: "false"
   skip-checkout:
     description: >
       Skip checking out the base commit. Enable only when the workflow already
@@ -75,6 +80,7 @@ runs:
       uses: actions/github-script@v8
       env:
         COMMENTS_FILE: ${{ runner.temp }}/po-pr-review-comments.json
+        FAIL_ON_MISMATCH: ${{ inputs.fail-on-mismatch }}
       with:
         github-token: ${{ inputs.token }}
         script: |
@@ -130,6 +136,12 @@ runs:
           }
 
           core.setOutput("comments-posted", String(bodies.length));
+
+          if (process.env.FAIL_ON_MISMATCH === "true" && payload.mismatch_count) {
+            core.setFailed(
+              `${payload.mismatch_count} translation(s) do not keep the HTML tags, URLs, or placeholders of their source string. See the PR comment for details.`
+            );
+          }
 
           if (payload.error_count) {
             core.setFailed(

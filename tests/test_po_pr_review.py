@@ -12,6 +12,7 @@ from po_pr_review import (
     cluster_similar_change_sizes,
     compare_entries,
     compare_pot_entries,
+    find_markup_mismatches,
     load_translation_entries,
     parse_hidden_po_files,
     should_hide_report_from_review,
@@ -462,6 +463,207 @@ msgstr ""
         self.assertIn("part 2 of", joined)
         for change in changes:
             self.assertIn(change["after"].msgid, joined)
+
+    def _mismatches(self, msgid, translation, msgid_plural=None):
+        entry = TranslationEntry("", msgid, msgid_plural, translation)
+        report = {
+            "language": "de",
+            "path": "locale/de.po",
+            "status": "modified",
+            "changes": [{"status": "added", "before": None, "after": entry}],
+        }
+        return find_markup_mismatches([report])
+
+    def test_markup_mismatch_passes_unchanged_markup(self):
+        msgid = '<b>{0}</b> is not a valid <a href="https://example.com/docs">URL</a>'
+        translation = (
+            '<b>{0}</b> ist keine gültige <a href="https://example.com/docs">URL</a>'
+        )
+
+        self.assertEqual(self._mismatches(msgid, (translation,)), [])
+
+    def test_markup_mismatch_flags_href_swap(self):
+        mismatches = self._mismatches(
+            '<a href="https://example.com">Docs</a>',
+            ('<a href="https://evil.example">Doku</a>',),
+        )
+
+        self.assertEqual(len(mismatches), 1)
+        self.assertEqual(
+            list(mismatches[0]["missing"]), ['<a href="https://example.com">']
+        )
+        self.assertEqual(
+            list(mismatches[0]["extra"]), ['<a href="https://evil.example">']
+        )
+
+    def test_markup_mismatch_flags_injected_script_and_img(self):
+        script = self._mismatches("Save", ("Speichern<script>alert(1)</script>",))
+        img = self._mismatches("Save", ("<img src=x onerror=alert(1)>Speichern",))
+
+        self.assertEqual(
+            sorted(script[0]["extra"].elements()), ["</script>", "<script>"]
+        )
+        self.assertEqual(list(img[0]["extra"]), ["<img onerror=alert(1) src=x>"])
+
+    def test_markup_mismatch_flags_dropped_placeholder(self):
+        mismatches = self._mismatches("Cannot {0} {1}", ("Kann {0} nicht",))
+
+        self.assertEqual(list(mismatches[0]["missing"]), ["{1}"])
+        self.assertFalse(mismatches[0]["extra"])
+
+    def test_markup_mismatch_treats_lone_auto_brace_as_first_positional(self):
+        lone = self._mismatches(
+            "App {} is not installed", ("App {0} ist nicht installiert",)
+        )
+        repeated = self._mismatches("{} of {}", ("{0} von {0}",))
+
+        self.assertEqual(lone, [])
+        self.assertEqual(list(repeated[0]["missing"]), ["{}"])
+
+    def test_markup_mismatch_flags_unclosed_tag(self):
+        mismatches = self._mismatches(
+            "Save", ("Speichern <img src=x onerror=alert(1) ",)
+        )
+
+        self.assertEqual(list(mismatches[0]["extra"]), ["<img onerror=alert(1) src=x>"])
+
+    def test_markup_mismatch_flags_attribute_after_quoted_angle_bracket(self):
+        mismatches = self._mismatches(
+            '<img title="a>b" src=x>', ('<img title="a>b" src=x onerror=alert(1)>',)
+        )
+
+        self.assertEqual(
+            list(mismatches[0]["extra"]), ['<img onerror=alert(1) src=x title="a>b">']
+        )
+
+    def test_markup_mismatch_flags_url_with_uppercase_scheme(self):
+        changed_host = self._mismatches(
+            "See HTTPS://example.com/docs", ("Siehe HTTPS://evil.example/docs",)
+        )
+        lowercased_scheme = self._mismatches(
+            "See HTTPS://example.com/docs", ("Siehe https://example.com/docs",)
+        )
+
+        self.assertEqual(list(changed_host[0]["extra"]), ["https://evil.example/docs"])
+        self.assertEqual(lowercased_scheme, [])
+
+    def test_markup_mismatch_flags_changed_whitespace_inside_jinja(self):
+        mismatches = self._mismatches(
+            "{{ doc.name | replace('  ', ' ') }}",
+            ("{{ doc.name | replace(' ', ' ') }}",),
+        )
+
+        self.assertEqual(len(mismatches), 1)
+
+    def test_markup_mismatch_skips_crowdin_pseudo_locale_unless_markup_added(self):
+        dropped_markup = self._mismatches(
+            '<b>{0}</b> see <a href="https://example.com">docs</a>',
+            ("crwdns101:0{0}crwdne101:0",),
+        )
+        injected_markup = self._mismatches(
+            "{0} saved", ("crwdns102:0{0}<script>crwdne102:0",)
+        )
+
+        self.assertEqual(dropped_markup, [])
+        self.assertEqual(list(injected_markup[0]["extra"]), ["<script>"])
+
+    def test_markup_mismatch_passes_reordered_placeholders(self):
+        self.assertEqual(
+            self._mismatches("Cannot {0} {1}.", ("Kann {1} nicht {0}.",)), []
+        )
+
+    def test_markup_mismatch_ignores_attribute_order_and_code_braces(self):
+        attribute_order = self._mismatches(
+            '<a target="_blank" href="https://example.com/">Download</a>',
+            ('<a href="https://example.com/" target="_blank">Herunterladen</a>',),
+        )
+        css_block = self._mismatches(
+            "Use { margin: 0; } here", ("Nutze {margin: 0;} hier",)
+        )
+        jinja_spacing = self._mismatches(
+            "Example: {{ subject }}", ("Beispiel: {{subject}}",)
+        )
+        url_punctuation = self._mismatches(
+            "See https://example.com/docs.", ("Siehe https://example.com/docs",)
+        )
+
+        self.assertEqual(attribute_order, [])
+        self.assertEqual(css_block, [])
+        self.assertEqual(jinja_spacing, [])
+        self.assertEqual(url_punctuation, [])
+        self.assertEqual(
+            self._mismatches(
+                "Allowed (e.g. https://example.com).",
+                ("允许（例如 https://example.com）。",),
+            ),
+            [],
+        )
+
+    def test_markup_mismatch_skips_empty_translations(self):
+        self.assertEqual(self._mismatches("<b>{0}</b>", ("",)), [])
+
+    def test_markup_mismatch_checks_each_plural_form(self):
+        ok = self._mismatches(
+            "One <b>file</b>",
+            ("Eine <b>Datei</b>", "{0} <b>Dateien</b>"),
+            "{0} <b>files</b>",
+        )
+        broken = self._mismatches(
+            "One <b>file</b>", ("Eine <b>Datei</b>", "{0} Dateien"), "{0} <b>files</b>"
+        )
+
+        self.assertEqual(ok, [])
+        self.assertEqual(len(broken), 1)
+        self.assertEqual(broken[0]["form"], 1)
+        self.assertEqual(sorted(broken[0]["missing"]), ["</b>", "<b>"])
+
+    def test_build_comment_renders_mismatches_escaped_with_count(self):
+        po_files = [
+            {"filename": "de.po", "status": "modified", "additions": 1, "deletions": 0}
+        ]
+        report = self._po_report("de", "locale/de.po", ["Save"])
+        report["changes"][0]["after"] = TranslationEntry(
+            "", "Save", None, ("<img src=x onerror=alert(1)>",)
+        )
+
+        body = build_comment(po_files, [report], [], [])
+
+        self.assertIn("- Markup / URL / placeholder mismatches: `1`", body)
+        self.assertIn("### Markup / URL / Placeholder Mismatches", body)
+        self.assertNotIn("<img", body)
+        self.assertIn("&lt;img onerror=alert(1) src=x&gt;", body)
+        self.assertLess(
+            body.index("Placeholder Mismatches"),
+            body.index("Similar Change-Size Groups"),
+        )
+
+    def test_build_comment_includes_mismatches_from_hidden_files(self):
+        po_files = [
+            {"filename": "eo.po", "status": "modified", "additions": 1, "deletions": 0}
+        ]
+        report = self._po_report("eo", "locale/eo.po", ["{0} saved"])
+
+        body = build_comment(po_files, [report], [], [], hidden_po_files={"eo.po"})
+
+        self.assertIn("- Markup / URL / placeholder mismatches: `1`", body)
+        self.assertIn("eo (locale/eo.po)", body)
+
+    def test_build_comment_truncates_mismatch_section_explicitly(self):
+        msgids = [f"{{0}} item {index:03d} " + "x" * 200 for index in range(200)]
+        po_files = [
+            {
+                "filename": "de.po",
+                "status": "modified",
+                "additions": 200,
+                "deletions": 0,
+            }
+        ]
+        report = self._po_report("de", "locale/de.po", msgids)
+
+        bodies = build_comment_bodies(po_files, [report], [], [])
+
+        self.assertIn("- Markup / URL / placeholder mismatches: `200`", bodies[0])
+        self.assertRegex(bodies[0], r"\.\.\. and `\d+` more mismatch\(es\) not shown")
 
 
 if __name__ == "__main__":

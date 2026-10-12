@@ -14,6 +14,7 @@ The logic is based on the workflow used in [Frappe Framework](https://github.com
 - Highlights added and changed translations in per-language collapsible sections
 - Compares `.pot` template files and reports added, removed, and corrected `msgid` strings in per-file collapsible sections
 - Compiles head `.po` and `.pot` files in strict mode and fails the job if a file is invalid (for example, it contains git conflict markers). `bench build` would silently skip such lines.
+- Flags added or changed translations that do not keep the HTML tags (including attributes), URLs, and placeholders (`{0}`, `{name}`, `{{ jinja }}`, `%s`) of their source string. This catches broken placeholders and injected links or scripts. Hidden `.po` files are also checked.
 - Detects bulk updates via similar change-size grouping
 - Packs multiple sections into one comment when they fit; splits oversized sections (and comments) within GitHub size limits
 - Replaces previous bot comments on synchronize to avoid stale summaries
@@ -66,6 +67,7 @@ The action checks out the trusted `base-sha` by default. If your workflow alread
 | `base-sha` | No | `${{ github.event.pull_request.base.sha }}` | Trusted base commit SHA for comparison |
 | `python-version` | No | `3.12` | Python version for the review helper |
 | `hidden-po-files` | No | *(empty)* | Comma-separated `.po` file names omitted from language detail tables |
+| `fail-on-mismatch` | No | `false` | Fail the job after posting comments if a translation does not keep the HTML tags, URLs, or placeholders of its source string |
 | `skip-checkout` | No | `false` | Skip the built-in base checkout step |
 
 ## Outputs

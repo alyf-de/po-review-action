@@ -12,6 +12,7 @@ import html
 import io
 import json
 import os
+import re
 import time
 import urllib.parse
 import urllib.request
@@ -29,6 +30,27 @@ COMMENT_MARKER = "<!-- po-translation-review -->"
 POT_COMMENT_MARKER = "<!-- pot-template-review -->"
 MAX_COMMENT_BODY_CHARS = 60_000  # GitHub caps issue comments at 65536 characters
 SIMILARITY_TOLERANCE = 0.02
+# Leave room for language sections in the first comment.
+MAX_MISMATCH_SECTION_CHARS = 20_000
+
+# Tokens a translation must keep verbatim: HTML tags, Jinja expressions, Python
+# format placeholders ({}, {0}, {name}, {0:.2f}), URLs and %-style placeholders.
+# Brace placeholders exclude spaces so CSS/JSON code blocks are not treated as tokens.
+# URLs use the ASCII URL characters so trailing CJK text or quotes are not included.
+# A tag left open at the end is a token too, since the page's next ">" would close it.
+# Quoted attribute values may contain ">"; a stray quote is matched as a plain character.
+PROTECTED_TOKEN_PATTERN = re.compile(
+    r"""</?[a-zA-Z](?:"[^"]*"|'[^']*'|[^>])*(?:>|$)"""
+    r"|\{\{.*?\}\}"
+    r"|\{\w*(?:[:!][^{}\s]*)?\}"
+    r"|(?i:https?)://[A-Za-z0-9_\-.~:/?#\[\]@!$&*+,;=%()]+"
+    r"|%(?:\(\w+\))?[sd]",
+    re.DOTALL,
+)
+TAG_NAME_PATTERN = re.compile(r"</?([a-zA-Z][\w:-]*)")
+TAG_ATTRIBUTE_PATTERN = re.compile(
+    r"""([\w:-]+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s>]+))?"""
+)
 
 
 @dataclass(frozen=True)
@@ -416,6 +438,140 @@ def render_msgid(entry: TranslationEntry) -> str:
     return "\n".join(parts)
 
 
+def normalize_protected_token(token: str) -> str:
+    """Normalize formatting that translators may change without changing meaning."""
+
+    if token.startswith("<"):
+        name_match = TAG_NAME_PATTERN.match(token)
+        assert name_match  # PROTECTED_TOKEN_PATTERN only yields tags with a name
+        closing = "/" if token.startswith("</") else ""
+        # Attribute values stay exact; only their order and spacing are normalized.
+        attributes = sorted(
+            f"{name.lower()}={value}" if value else name.lower()
+            for name, value in TAG_ATTRIBUTE_PATTERN.findall(token[name_match.end() :])
+        )
+        return f"<{closing}{' '.join([name_match.group(1).lower(), *attributes])}>"
+
+    if token.startswith("{{"):
+        # Only the padding is normalized; inner whitespace can be part of a string value.
+        return "{{ " + token[2:-2].strip() + " }}"
+
+    if token[:4].lower() == "http":
+        scheme, rest = token.split("://", 1)
+        return f"{scheme.lower()}://{rest}".rstrip(".,;:)")
+
+    return token
+
+
+def protected_tokens(text: str) -> Counter[str]:
+    tokens = Counter(
+        normalize_protected_token(token)
+        for token in PROTECTED_TOKEN_PATTERN.findall(text)
+    )
+    # A lone "{}" formats the same argument as "{0}".
+    if tokens["{}"] == 1 and not tokens["{0}"]:
+        tokens["{0}"] = tokens.pop("{}")
+    return tokens
+
+
+def find_markup_mismatches(
+    language_reports: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return translation forms whose protected tokens differ from the source msgid.
+
+    A plural form may match either msgid or msgid_plural, because single-form
+    languages and forms such as Russian "21 files" reuse the other source text.
+    """
+
+    mismatches: list[dict[str, Any]] = []
+
+    for report in language_reports:
+        for change in report["changes"]:
+            entry: TranslationEntry = change["after"]
+            msgid_tokens = protected_tokens(entry.msgid)
+            plural_tokens = protected_tokens(entry.msgid_plural or entry.msgid)
+
+            for form, translation in enumerate(entry.translation):
+                if not translation.strip():
+                    continue
+
+                tokens = protected_tokens(translation)
+                if tokens in (msgid_tokens, plural_tokens):
+                    continue
+
+                # Crowdin's in-context pseudo-locale keeps only placeholders; flag only injected markup or URLs.
+                if translation.startswith("crwdns") and not any(
+                    token.startswith(("<", "http")) for token in tokens
+                ):
+                    continue
+
+                expected = msgid_tokens if form == 0 else plural_tokens
+                mismatches.append(
+                    {
+                        "report": report,
+                        "entry": entry,
+                        "form": form,
+                        "translation": translation,
+                        "missing": expected - tokens,
+                        "extra": tokens - expected,
+                    }
+                )
+
+    return mismatches
+
+
+def _build_mismatch_lines(mismatches: list[dict[str, Any]]) -> list[str]:
+    """Render mismatches as a table, truncated with an explicit note if too long."""
+
+    if not mismatches:
+        return []
+
+    lines = [
+        "",
+        "### Markup / URL / Placeholder Mismatches",
+        "",
+        "These translations do not keep the HTML tags, URLs, or placeholders of their source string.",
+        "",
+        "| File | Msgid | Missing | Extra | Translation |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    section_chars = 0
+
+    for index, mismatch in enumerate(mismatches):
+        report = mismatch["report"]
+        entry = mismatch["entry"]
+        translation = mismatch["translation"]
+        if entry.msgid_plural:
+            translation = f"[{mismatch['form']}] {translation}"
+
+        row = (
+            "| "
+            + " | ".join(
+                [
+                    escape_table_cell(f"{report['language']} ({report['path']})"),
+                    escape_table_cell(render_msgid(entry)),
+                    escape_table_cell(
+                        "\n".join(sorted(mismatch["missing"].elements()))
+                    ),
+                    escape_table_cell("\n".join(sorted(mismatch["extra"].elements()))),
+                    escape_table_cell(translation),
+                ]
+            )
+            + " |"
+        )
+        section_chars += len(row)
+        if section_chars > MAX_MISMATCH_SECTION_CHARS:
+            lines.append("")
+            lines.append(
+                f"... and `{len(mismatches) - index}` more mismatch(es) not shown."
+            )
+            break
+
+        lines.append(row)
+
+    return lines
+
+
 def should_hide_report_from_review(
     report: dict[str, Any], hidden_po_files: set[str]
 ) -> bool:
@@ -502,6 +658,8 @@ def _review_context(
         "metadata_only_reports": metadata_only_reports,
         "similar_groups": similar_groups,
         "parse_errors": parse_errors,
+        # Hidden files are included: an injected link is harmful in any locale.
+        "mismatches": find_markup_mismatches(language_reports),
     }
 
 
@@ -513,6 +671,7 @@ def _build_prefix_lines(ctx: dict[str, Any]) -> list[str]:
     changed_languages_count = ctx["changed_languages_count"]
     parse_errors: list[dict[str, str]] = ctx["parse_errors"]
     similar_groups: list[dict[str, Any]] = ctx["similar_groups"]
+    mismatches: list[dict[str, Any]] = ctx["mismatches"]
 
     lines = [
         COMMENT_MARKER,
@@ -523,11 +682,13 @@ def _build_prefix_lines(ctx: dict[str, Any]) -> list[str]:
         f"- Removed files: `{status_counts['removed']}`",
         f"- Files in similar change-size groups within 2% tolerance: `{grouped_files_count}`",
         f"- Added or changed translations detected: `{translation_change_count}` across `{changed_languages_count}` file(s)",
+        f"- Markup / URL / placeholder mismatches: `{len(mismatches)}`",
     ]
 
     if parse_errors:
         lines.append(f"- Files that could not be parsed: `{len(parse_errors)}`")
 
+    lines.extend(_build_mismatch_lines(mismatches))
     lines.extend(["", "### Similar Change-Size Groups", ""])
 
     if similar_groups:
@@ -1328,6 +1489,7 @@ def main() -> None:
                 "comments": po_bodies,
                 "pot_comments": pot_bodies,
                 "error_count": len(po_parse_errors) + len(pot_parse_errors),
+                "mismatch_count": len(find_markup_mismatches(language_reports)),
             },
             ensure_ascii=False,
         ),
