@@ -536,6 +536,17 @@ msgstr ""
             list(mismatches[0]["extra"]), ['<img onerror=alert(1) src=x title="a>b">']
         )
 
+    def test_markup_mismatch_flags_url_with_uppercase_scheme(self):
+        changed_host = self._mismatches(
+            "See HTTPS://example.com/docs", ("Siehe HTTPS://evil.example/docs",)
+        )
+        lowercased_scheme = self._mismatches(
+            "See HTTPS://example.com/docs", ("Siehe https://example.com/docs",)
+        )
+
+        self.assertEqual(list(changed_host[0]["extra"]), ["https://evil.example/docs"])
+        self.assertEqual(lowercased_scheme, [])
+
     def test_markup_mismatch_skips_crowdin_pseudo_locale_unless_markup_added(self):
         dropped_markup = self._mismatches(
             '<b>{0}</b> see <a href="https://example.com">docs</a>',

@@ -43,7 +43,7 @@ PROTECTED_TOKEN_PATTERN = re.compile(
     r"""</?[a-zA-Z](?:"[^"]*"|'[^']*'|[^>])*(?:>|$)"""
     r"|\{\{.*?\}\}"
     r"|\{\w*(?:[:!][^{}\s]*)?\}"
-    r"|https?://[A-Za-z0-9_\-.~:/?#\[\]@!$&*+,;=%()]+"
+    r"|(?i:https?)://[A-Za-z0-9_\-.~:/?#\[\]@!$&*+,;=%()]+"
     r"|%(?:\(\w+\))?[sd]",
     re.DOTALL,
 )
@@ -455,8 +455,9 @@ def normalize_protected_token(token: str) -> str:
     if token.startswith("{{"):
         return "{{ " + " ".join(token[2:-2].split()) + " }}"
 
-    if token.startswith("http"):
-        return token.rstrip(".,;:)")
+    if token[:4].lower() == "http":
+        scheme, rest = token.split("://", 1)
+        return f"{scheme.lower()}://{rest}".rstrip(".,;:)")
 
     return token
 
