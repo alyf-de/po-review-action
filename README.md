@@ -56,6 +56,23 @@ jobs:
 
 The action checks out the trusted `base-sha` by default. If your workflow already checked out the base commit, pass `skip-checkout: true`.
 
+### Skip release pull requests
+
+Release pull requests merge a branch that already contains reviewed translations (for example, `version-15-hotfix` into `version-15`). To skip them, exclude their base branches in the trigger. The workflow runs only when both the branch filter and the path filter match:
+
+```yaml
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+    branches-ignore:
+      - "version-[0-9][0-9]"
+    paths:
+      - "**/*.po"
+      - "**/*.pot"
+```
+
+With this filter, pull requests into `develop` or `version-15-hotfix` still get reviewed. Pull requests into `version-15` do not.
+
 ## Inputs
 
 | Input | Required | Default | Description |
