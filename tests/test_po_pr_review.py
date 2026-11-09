@@ -123,6 +123,39 @@ msgstr "Servus"
         self.assertIn("Changed files: `1`", comment)
         self.assertIn("Hello", comment)
 
+    def test_build_comment_affirms_passed_checks(self):
+        po_files = [
+            {"filename": "de.po", "status": "modified", "additions": 1, "deletions": 0}
+        ]
+        report = self._po_report("de", "locale/de.po", ["{0} saved"])
+        report["changes"][0]["after"] = TranslationEntry(
+            "", "{0} saved", None, ("{0} gespeichert",)
+        )
+
+        body = build_comment(po_files, [report], [], [])
+
+        self.assertIn("- ✅ All changed `.po` files compile in strict mode", body)
+        self.assertIn(
+            "- ✅ All added or changed translations keep the HTML tags, URLs, and placeholders",
+            body,
+        )
+
+    def test_build_comment_reports_failed_checks(self):
+        po_files = [
+            {"filename": "de.po", "status": "modified", "additions": 1, "deletions": 0}
+        ]
+        report = self._po_report("de", "locale/de.po", ["{0} saved"])
+        errors = [{"path": "locale/fr.po", "error": "conflict marker"}]
+
+        body = build_comment(po_files, [report], [], errors)
+
+        self.assertIn("- ❌ `1` file(s) could not be parsed or compiled", body)
+        self.assertIn(
+            "- ❌ `1` translation(s) do not keep the HTML tags, URLs, or placeholders",
+            body,
+        )
+        self.assertNotIn("✅", body)
+
     def test_hidden_po_files_empty_by_default(self):
         hidden = parse_hidden_po_files(None)
 
@@ -286,6 +319,34 @@ msgstr ""
         self.assertIn("| added |", bodies[0])
         self.assertIn("| removed |", bodies[0])
 
+    def test_build_pot_comment_affirms_compile_check(self):
+        report = {
+            "path": "locale/main.pot",
+            "status": "modified",
+            "changes": [self._pot_change("added", "Configure")],
+        }
+        metadata_only_report = {**report, "changes": []}
+
+        for reports in ([report], [metadata_only_report]):
+            body = build_pot_comment_bodies(reports, [])[0]
+            self.assertIn("Here is a summary of the `.pot` file changes:", body)
+            self.assertIn("- ✅ All changed `.pot` files compile in strict mode.", body)
+
+    def test_build_pot_comment_reports_failed_compile_check(self):
+        report = {
+            "path": "locale/main.pot",
+            "status": "modified",
+            "changes": [self._pot_change("added", "Configure")],
+        }
+        errors = [{"path": "locale/other.pot", "error": "conflict marker"}]
+
+        body = build_pot_comment_bodies([report], errors)[0]
+
+        self.assertIn("- Changed files: `2`", body)
+        self.assertIn("- ❌ `1` file(s) could not be parsed or compiled", body)
+        self.assertIn("### Parse Errors", body)
+        self.assertNotIn("✅", body)
+
     def test_build_pot_comment_includes_corrected_rows(self):
         pot_reports = [
             {
@@ -393,7 +454,7 @@ msgstr ""
         ]
 
         bodies = build_comment_bodies(
-            po_files, language_reports, [], [], max_body_chars=650
+            po_files, language_reports, [], [], max_body_chars=800
         )
 
         self.assertGreaterEqual(len(bodies), 2)
@@ -628,7 +689,7 @@ msgstr ""
 
         body = build_comment(po_files, [report], [], [])
 
-        self.assertIn("- Markup / URL / placeholder mismatches: `1`", body)
+        self.assertIn("- ❌ `1` translation(s) do not keep", body)
         self.assertIn("### Markup / URL / Placeholder Mismatches", body)
         self.assertNotIn("<img", body)
         self.assertIn("&lt;img onerror=alert(1) src=x&gt;", body)
@@ -645,7 +706,7 @@ msgstr ""
 
         body = build_comment(po_files, [report], [], [], hidden_po_files={"eo.po"})
 
-        self.assertIn("- Markup / URL / placeholder mismatches: `1`", body)
+        self.assertIn("- ❌ `1` translation(s) do not keep", body)
         self.assertIn("eo (locale/eo.po)", body)
 
     def test_build_comment_truncates_mismatch_section_explicitly(self):
@@ -662,7 +723,7 @@ msgstr ""
 
         bodies = build_comment_bodies(po_files, [report], [], [])
 
-        self.assertIn("- Markup / URL / placeholder mismatches: `200`", bodies[0])
+        self.assertIn("- ❌ `200` translation(s) do not keep", bodies[0])
         self.assertRegex(bodies[0], r"\.\.\. and `\d+` more mismatch\(es\) not shown")
 
 

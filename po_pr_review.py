@@ -682,11 +682,18 @@ def _build_prefix_lines(ctx: dict[str, Any]) -> list[str]:
         f"- Removed files: `{status_counts['removed']}`",
         f"- Files in similar change-size groups within 2% tolerance: `{grouped_files_count}`",
         f"- Added or changed translations detected: `{translation_change_count}` across `{changed_languages_count}` file(s)",
-        f"- Markup / URL / placeholder mismatches: `{len(mismatches)}`",
     ]
 
-    if parse_errors:
-        lines.append(f"- Files that could not be parsed: `{len(parse_errors)}`")
+    lines.append(_compile_verdict_line(parse_errors, ".po"))
+
+    if mismatches:
+        lines.append(
+            f"- ❌ `{len(mismatches)}` translation(s) do not keep the HTML tags, URLs, or placeholders of their source string."
+        )
+    else:
+        lines.append(
+            "- ✅ All added or changed translations keep the HTML tags, URLs, and placeholders of their source string."
+        )
 
     lines.extend(_build_mismatch_lines(mismatches))
     lines.extend(["", "### Similar Change-Size Groups", ""])
@@ -708,6 +715,12 @@ def _build_prefix_lines(ctx: dict[str, Any]) -> list[str]:
         )
 
     return lines
+
+
+def _compile_verdict_line(parse_errors: list[dict[str, str]], suffix: str) -> str:
+    if parse_errors:
+        return f"- ❌ `{len(parse_errors)}` file(s) could not be parsed or compiled. See _Parse Errors_ below."
+    return f"- ✅ All changed `{suffix}` files compile in strict mode."
 
 
 def _build_report_list_section(
@@ -1311,27 +1324,28 @@ def build_pot_comment_bodies(
     """Build one or more .pot review comment bodies under GitHub's size limit."""
 
     reports_with_changes = [report for report in pot_reports if report.get("changes")]
+    # Files that failed to parse have no report, so they are counted separately.
+    file_count = len(pot_reports) + len(parse_errors)
+    status_counts = Counter(report.get("status", "modified") for report in pot_reports)
+    prefix_text = (
+        "\n".join(
+            [
+                POT_COMMENT_MARKER,
+                "Here is a summary of the `.pot` file changes:",
+                "",
+                f"- Changed files: `{file_count}`",
+                f"- Added files: `{status_counts.get('added', 0)}`",
+                f"- Removed files: `{status_counts.get('removed', 0)}`",
+                _compile_verdict_line(parse_errors, ".pot"),
+            ]
+        )
+        + "\n\n"
+    )
+
     if not reports_with_changes and not parse_errors:
         if not pot_reports:
             return []
 
-        status_counts = Counter(
-            report.get("status", "modified") for report in pot_reports
-        )
-        file_count = len(pot_reports)
-        prefix_text = (
-            "\n".join(
-                [
-                    POT_COMMENT_MARKER,
-                    "Here is a summary of the `.pot` file changes:",
-                    "",
-                    f"- Changed files: `{file_count}`",
-                    f"- Added files: `{status_counts.get('added', 0)}`",
-                    f"- Removed files: `{status_counts.get('removed', 0)}`",
-                ]
-            )
-            + "\n\n"
-        )
         suffix_lines = [
             "### Metadata-Only File Changes",
             "",
@@ -1365,7 +1379,6 @@ def build_pot_comment_bodies(
         return [body]
 
     suffix_text = "\n".join(_build_parse_error_lines(parse_errors))
-    prefix_text = f"{POT_COMMENT_MARKER}\n\n"
 
     def render_pot_part(
         *,
